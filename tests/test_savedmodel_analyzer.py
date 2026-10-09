@@ -78,14 +78,22 @@ def test_pyfunc_flagged_malicious(tmp_path: Path):
     assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
 
 
-def test_savev2_flagged_suspicious_not_malicious(tmp_path: Path):
-    # Arrange — yalnızca SaveV2: normal modeller de içerir => SUSPICIOUS.
+def test_standard_checkpoint_ops_are_low(tmp_path: Path):
+    # Arrange — tf.saved_model.save'in her modele eklediği saver op'ları.
     pb = tmp_path / "saved_model.pb"
-    pb.write_bytes(_fake_pb("Const", "SaveV2", "Add"))
+    pb.write_bytes(_fake_pb("Const", "SaveV2", "RestoreV2", "MergeV2Checkpoints", "Add"))
     # Act
     findings = SavedModelAnalyzer().analyze(pb)
-    # Assert — en yüksek düzey SUSPICIOUS olmalı, MALICIOUS değil.
-    assert findings, "SaveV2 en az bir bulgu üretmeli"
+    # Assert — inceleme bulgusu: normal TF modeli şüpheli sayılmamalı (en fazla LOW).
+    assert findings, "checkpoint op'ları bilgi notu üretmeli"
+    assert max(f.severity for f in findings) == Severity.LOW, _titles(findings)
+
+
+def test_printv2_flagged_suspicious(tmp_path: Path):
+    # PrintV2 dosyaya yazabilir ve her modelde bulunmaz => SUSPICIOUS.
+    pb = tmp_path / "saved_model.pb"
+    pb.write_bytes(_fake_pb("Const", "PrintV2"))
+    findings = SavedModelAnalyzer().analyze(pb)
     assert max(f.severity for f in findings) == Severity.SUSPICIOUS, _titles(findings)
 
 

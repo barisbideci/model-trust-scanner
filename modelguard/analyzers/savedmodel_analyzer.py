@@ -46,18 +46,24 @@ _MALICIOUS_OPS: dict[str, str] = {
     "PyCall": "keyfi bir Python callback'i çağırır",
 }
 
-# Daha az kesin IO op'ları: meşru modellerde de görülür (checkpoint kaydet/yükle),
-# ama saldırgan tarafından kötüye kullanılabilir => SUSPICIOUS (gözden geçir).
+# IO op'ları: normal inference grafiklerinde nadirdir, saldırgan kötüye
+# kullanabilir => SUSPICIOUS (gözden geçir).
 _SUSPICIOUS_OPS: dict[str, str] = {
-    "MergeV2Checkpoints": "checkpoint dosyalarını birleştirir (dosya sistemi erişimi)",
+    "MatchingFiles": "glob deseniyle dosya sistemini tarar",
+    "PrintV2": "stderr/stdout'a ya da bir dosyaya yazar",
+    "DecodeRaw": "ham baytları çözer (veri sızdırma zincirinde kullanılabilir)",
+}
+
+# Checkpoint kaydet/yükle op'ları: tf.saved_model.save HER modelin saver
+# grafiğine bunları ekler. SUSPICIOUS saymak her TF modelini şüpheli yapardı
+# (inceleme bulgusu); yalnızca bilgi notu (LOW) olarak raporlanır.
+_CHECKPOINT_OPS: dict[str, str] = {
+    "MergeV2Checkpoints": "checkpoint dosyalarını birleştirir",
     "Save": "tensörleri diske yazar",
     "SaveV2": "tensörleri diske yazar",
     "SaveSlices": "tensör dilimlerini diske yazar",
     "Restore": "diskten tensör okur",
     "RestoreV2": "diskten tensör okur",
-    "MatchingFiles": "glob deseniyle dosya sistemini tarar",
-    "PrintV2": "stderr/stdout'a ya da bir dosyaya yazar",
-    "DecodeRaw": "ham baytları çözer (veri sızdırma zincirinde kullanılabilir)",
 }
 
 # .pb içinden op adı adayı olarak yalnızca CamelCase token'ları değerlendiririz;
@@ -173,6 +179,22 @@ class SavedModelAnalyzer(Analyzer):
                         location=location,
                         evidence=op,
                         atlas="AML.T0011",
+                        owasp="ML06",
+                    )
+                )
+            elif op in _CHECKPOINT_OPS:
+                findings.append(
+                    Finding(
+                        analyzer=self.name,
+                        severity=Severity.LOW,
+                        title=f"Checkpoint op'u (beklenen): {op}",
+                        detail=(
+                            f"'{op}' — {_CHECKPOINT_OPS[op]}. tf.saved_model.save her "
+                            "modelin saver grafiğine bu op'ları ekler; tek başına "
+                            "şüpheli değildir, bilgi amaçlı not edilir."
+                        ),
+                        location=location,
+                        evidence=op,
                         owasp="ML06",
                     )
                 )
