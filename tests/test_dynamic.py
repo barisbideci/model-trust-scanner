@@ -127,3 +127,26 @@ def test_host_backend_kills_lingering_background_process(tmp_path):
     _time.sleep(5)
     assert not Path(marker).exists(), \
         "arka plan süreci tarama sonrası hayatta kaldı (ağaç sonlandırma başarısız)"
+
+
+# --- Docker backend (Docker yoksa atlanır) ------------------------------------
+
+from modelguard.dynamic.sandbox import docker_available
+
+
+@pytest.mark.skipif(not docker_available(), reason="Docker daemon çalışmıyor")
+def test_docker_backend_detects_execution_in_container(tmp_path):
+    # Linux konteynerde çözülebilsin diye payload'ı posix.system'e yönlendiririz
+    # (Windows'ta üretilen pickle 'nt.system' taşır). Komut zararsız: 'id'.
+    data = pickle.dumps(_EchoCanary(), protocol=2)
+    data = data.replace(b"cnt\nsystem\n", b"cposix\nsystem\n")
+    data = data.replace(b"echo modelguard-canary", b"id")
+    p = tmp_path / "model.pkl"
+    p.write_bytes(data)
+
+    # Act — izole konteynerde (ağ kapalı, salt-okunur) yükle ve izle.
+    findings = run_dynamic(p, backend="docker", timeout=120)
+
+    # Assert — konteyner içinde kod çalıştırma gözlenmeli.
+    assert any(f.severity == Severity.MALICIOUS for f in findings), \
+        [f.title for f in findings]
