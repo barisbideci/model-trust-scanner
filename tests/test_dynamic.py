@@ -1,0 +1,67 @@
+"""Dinamik sandbox testleri.
+
+GÜVENLİK: canary payload yalnızca ZARARSIZ `echo` çalıştırır. Testler host backend'de
+koşar (CI'da Docker olmayabilir). Gerçek zarar, ağ veya reverse shell YOKTUR.
+"""
+
+from __future__ import annotations
+
+import os
+import pickle
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from modelguard.dynamic.sandbox import run_dynamic
+from modelguard.models import Severity
+
+MONITOR = Path(__file__).parents[1] / "modelguard" / "dynamic" / "monitor.py"
+
+
+class _EchoCanary:
+    """unpickle edilince zararsız 'echo' çalıştırır — os.system audit olayını tetikler."""
+
+    def __reduce__(self):
+        return (os.system, ("echo modelguard-canary",))
+
+
+def _write_canary(tmp_path: Path) -> Path:
+    p = tmp_path / "canary.pkl"
+    p.write_bytes(pickle.dumps(_EchoCanary()))
+    return p
+
+
+def test_monitor_refuses_without_gate(tmp_path):
+    # Güvenlik kapısı: MODELGUARD_SANDBOX=1 yoksa model YÜKLENMEMELİ.
+    p = _write_canary(tmp_path)
+    env = {k: v for k, v in os.environ.items() if k != "MODELGUARD_SANDBOX"}
+    proc = subprocess.run(
+        [sys.executable, "-I", str(MONITOR), str(p)],
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+    # Gate reddinde çıkış kodu 3 ve ASCII anahtar kelime (JSON unicode-escape eder).
+    assert proc.returncode == 3
+    assert "MODELGUARD_SANDBOX" in proc.stdout
+
+
+def test_host_backend_detects_os_system(tmp_path):
+    # Arrange
+    p = _write_canary(tmp_path)
+    # Act — host backend (Docker gerekmez), açık onayla.
+    findings = run_dynamic(p, backend="host", allow_host=True, timeout=30)
+    # Assert — çalışma anında os.system gözlenmeli (MALICIOUS).
+    assert any(
+        f.severity == Severity.MALICIOUS and "system" in f.evidence
+        for f in findings
+    ), [f.title for f in findings]
+
+
+def test_benign_pickle_no_malicious_dynamic(tmp_path):
+    # Zararsız bir pickle yüklenince kötü davranış gözlenmemeli.
+    p = tmp_path / "benign.pkl"
+    p.write_bytes(pickle.dumps({"w": [1, 2, 3]}))
+    findings = run_dynamic(p, backend="host", allow_host=True, timeout=30)
+    assert not any(f.severity == Severity.MALICIOUS for f in findings), \
+        [f.title for f in findings]
