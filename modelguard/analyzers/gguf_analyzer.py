@@ -77,26 +77,25 @@ _MALICIOUS_PATTERNS: tuple[str, ...] = (
     "__import__(",
 )
 
-# Jinja2 sandbox kaçışında kötüye kullanılan global yardımcılar. Bunlar tek
-# başına bir şablonda görülebilir ama birlikte attribute zinciriyle tehlikelidir.
+# Jinja2 sandbox kaçışında kötüye kullanılan global yardımcılar; chat
+# template'lerde nadirdir. NOT: `namespace` bilinçli olarak YOK — gerçek
+# şablonlar (ör. DeepSeek-R1-Distill) döngü durumunu tutmak için kullanır.
 _SANDBOX_ESCAPE_HELPERS: tuple[str, ...] = (
     "cycler",
     "joiner",
-    "namespace",
     "lipsum",
-    "url_for",
-    "get_flashed_messages",
 )
 
-# `{% ... %}` statement bloğu içinde kod yürütme/dinamik çağrı emareleri.
+# `{% import %}` / `{% from x import y %}`: şablon başka şablon/modül yükler.
+# Yalnızca statement başındaki anahtar kelime eşleşir; metin içinde geçen
+# "from" kelimesi (ör. "message from user") eşleşmez.
+_RE_TEMPLATE_IMPORT = re.compile(r"\{%-?\s*(import|from)\b")
+
+# `|attr(...)` filtresi: dunder adlarını string olarak kurup filtreyle çağırmak,
+# klasik SSTI kaçışıdır (ör. attr('__cla'+'ss__')).
 _STATEMENT_RED_FLAGS: tuple[str, ...] = (
-    "import ",
-    "from ",
     "attr(",
     "getattr",
-    "request",
-    "config",
-    "application",
 )
 
 # Jinja2 ifade/ statement sınırlayıcıları.
@@ -191,19 +190,39 @@ class GgufAnalyzer(Analyzer):
         statements = _RE_STATEMENT.findall(text)
         expressions = _RE_EXPRESSION.findall(text)
 
-        # 2) `{% %}` bloğu içinde kod/dinamik-çağrı emaresi -> MALICIOUS.
-        for block in statements:
+        # 2a) `{% import %}` / `{% from ... import %}` -> MALICIOUS.
+        m = _RE_TEMPLATE_IMPORT.search(text)
+        if m:
+            return [
+                Finding(
+                    analyzer=self.name,
+                    severity=Severity.MALICIOUS,
+                    title=f"chat_template içinde şablon import deyimi: {m.group(1)}",
+                    detail=(
+                        "Şablon `{% import %}` / `{% from ... import %}` ile dış içerik "
+                        "yüklemeye çalışıyor. Bir chat template'in buna ihtiyacı yoktur; "
+                        "sandbox'sız render'da kod çalıştırmaya götürebilir (CVE-2024-34359)."
+                    ),
+                    location=location,
+                    evidence=text[m.start():m.start() + 120],
+                    atlas="AML.T0011",
+                    owasp="ML06",
+                )
+            ]
+
+        # 2b) Jinja bloğu içinde attr()/getattr ile dinamik erişim -> MALICIOUS.
+        for block in statements + expressions:
             for flag in _STATEMENT_RED_FLAGS:
                 if flag in block:
                     return [
                         Finding(
                             analyzer=self.name,
                             severity=Severity.MALICIOUS,
-                            title=f"chat_template statement bloğunda tehlikeli kalıp: {flag.strip()}",
+                            title=f"chat_template içinde dinamik öznitelik erişimi: {flag.strip()}",
                             detail=(
-                                "`{% ... %}` statement bloğu içinde dinamik import/çağrı "
-                                "emaresi bulundu. Sandbox'sız Jinja2 render'ında bu kod "
-                                "çalıştırmaya götürebilir (CVE-2024-34359)."
+                                "Jinja bloğu içinde attr()/getattr ile dinamik öznitelik "
+                                "erişimi bulundu. Dunder adlarını string olarak kurup "
+                                "sandbox'ı aşmanın bilinen yoludur (CVE-2024-34359)."
                             ),
                             location=location,
                             evidence=block.strip()[:200],
@@ -212,7 +231,7 @@ class GgufAnalyzer(Analyzer):
                         )
                     ]
 
-        # 3) Sandbox kaçış yardımcısı + attribute zinciri -> SUSPICIOUS.
+        # 3) Sandbox kaçış yardımcısı -> SUSPICIOUS.
         for helper in _SANDBOX_ESCAPE_HELPERS:
             if helper in text:
                 return [
@@ -232,19 +251,20 @@ class GgufAnalyzer(Analyzer):
                     )
                 ]
 
-        # 4) `{{ ... }}` ifadesi içinde çok-halkalı attribute zinciri -> SUSPICIOUS.
+        # 4) `{{ ... }}` ifadesi içinde çok-halkalı attribute zinciri -> LOW (not).
+        # Araç çağrısı şablonlarında `tool_call.function.name` gibi meşru zincirler
+        # yaygındır; asıl tehlikeli olan dunder erişimi 1. adımda zaten MALICIOUS.
         for expr in expressions:
             if _RE_ATTR_CHAIN.search(expr):
                 return [
                     Finding(
                         analyzer=self.name,
-                        severity=Severity.SUSPICIOUS,
-                        title="chat_template ifadesinde şüpheli attribute zinciri",
+                        severity=Severity.LOW,
+                        title="chat_template ifadesinde attribute zinciri",
                         detail=(
                             "`{{ ... }}` ifadesinde art arda attribute erişimi (a.b.c) var. "
-                            "Meşru template'lerde de olabilir ama nesne grafiği gezintisi "
-                            "sandbox kaçışının tipik emaresidir; gözden geçirilmeli "
-                            "(CVE-2024-34359)."
+                            "Araç çağrısı şablonlarında meşrudur (ör. tool_call.function.name); "
+                            "dunder (__x__) içermediği için yalnızca not edilir."
                         ),
                         location=location,
                         evidence=expr.strip()[:200],

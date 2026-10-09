@@ -1,0 +1,8 @@
+# Metin dosyaları depoda LF olarak tutulur.
+* text=auto
+
+# Gerçek chat template'ler bayt-bayt korunur (regresyon verisi).
+*.jinja -text
+
+# İkili dosyalar.
+*.pdf binary

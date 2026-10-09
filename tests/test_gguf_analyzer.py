@@ -11,6 +11,8 @@ from __future__ import annotations
 import struct
 from pathlib import Path
 
+import pytest
+
 from modelguard.analyzers.gguf_analyzer import GgufAnalyzer
 from modelguard.models import Severity
 
@@ -184,3 +186,52 @@ def test_truncated_metadata_is_suspicious(tmp_path):
 
     # Assert — kesik metadata şüpheli sayılmalı.
     assert any(f.severity == Severity.SUSPICIOUS for f in findings), [f.title for f in findings]
+
+
+# --- İnceleme bulguları: gerçek şablonlarda yanlış alarm ----------------------
+
+_REAL_TEMPLATES = Path(__file__).parent / "data" / "real_templates"
+
+
+def _scan_template(tmp_path, template: str):
+    path = _write_gguf(tmp_path / "t.gguf", [_kv_string("tokenizer.chat_template", template)])
+    return GgufAnalyzer().analyze(path)
+
+
+@pytest.mark.parametrize("name", sorted(p.name for p in _REAL_TEMPLATES.glob("*.jinja")))
+def test_real_world_templates_are_clean(tmp_path, name):
+    # Gerçek Qwen2.5 / DeepSeek-R1-Distill şablonları en fazla LOW olmalı.
+    template = (_REAL_TEMPLATES / name).read_text(encoding="utf-8")
+    findings = _scan_template(tmp_path, template)
+    assert _max_severity(findings) <= Severity.LOW, [f.title for f in findings]
+
+
+def test_namespace_is_not_flagged(tmp_path):
+    # namespace() döngü durumu tutmak için meşru Jinja özelliğidir.
+    findings = _scan_template(
+        tmp_path,
+        "{%- set ns = namespace(found=false) %}{% for m in messages %}{{ m['content'] }}{% endfor %}",
+    )
+    assert findings == [], [f.title for f in findings]
+
+
+def test_tool_call_attribute_chain_is_low(tmp_path):
+    findings = _scan_template(tmp_path, "{% for t in tool_calls %}{{ t.function.name }}{% endfor %}")
+    assert _max_severity(findings) == Severity.LOW, [f.title for f in findings]
+
+
+def test_word_from_in_text_is_not_import(tmp_path):
+    # "from" kelimesinin metin içinde geçmesi import deyimi sayılmamalı.
+    findings = _scan_template(tmp_path, "{% set note = 'message from user' %}{{ note }}")
+    assert _max_severity(findings) < Severity.SUSPICIOUS, [f.title for f in findings]
+
+
+def test_from_import_statement_is_malicious(tmp_path):
+    findings = _scan_template(tmp_path, "{% from 'helpers.j2' import render %}{{ render() }}")
+    assert _max_severity(findings) == Severity.MALICIOUS, [f.title for f in findings]
+
+
+def test_attr_filter_is_malicious(tmp_path):
+    # |attr('...') ile dinamik öznitelik erişimi (zararsız ad).
+    findings = _scan_template(tmp_path, "{{ messages|attr('x') }}")
+    assert _max_severity(findings) == Severity.MALICIOUS, [f.title for f in findings]
