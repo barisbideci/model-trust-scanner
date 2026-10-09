@@ -134,8 +134,9 @@ def _run_host(path: Path, *, timeout: int):
     değildir); gerçek kullanımda Docker tercih edilmelidir.
     """
     import os
-
     import tempfile
+
+    from modelguard.dynamic import sysdiff
 
     env = dict(os.environ, MODELGUARD_SANDBOX="1")
     # Sonuç DOSYAYA yazılır: payload monitörün stdout pipe'ını miras alırsa,
@@ -145,15 +146,22 @@ def _run_host(path: Path, *, timeout: int):
     os.close(fd)
     cmd = [sys.executable, "-I", str(_MONITOR), str(path.resolve()), result_path]
 
+    # Yükleme ÖNCESİ sistem fotoğrafı (süreçler + dinlenen portlar).
+    before = sysdiff.snapshot()
+    sd = None
     try:
         with _HostGuard() as guard:
             proc = guard.spawn(cmd, env, quiet=True)
             proc.wait(timeout=timeout)  # yalnızca monitörü bekle, torunu değil
+            # Monitör çıktı ama GUARD HENÜZ öldürmedi: arkada kalan süreç/port
+            # hâlâ hayatta, şimdi fotoğrafla (sonra __exit__ ağacı sonlandırır).
+            after = sysdiff.snapshot()
+            sd = sysdiff.diff(before, after, ignore_pids={os.getpid(), proc.pid})
             try:
                 data = Path(result_path).read_text(encoding="utf-8")
             except OSError:
                 data = ""
-            return _parse_json(data), {"stderr": "", "rc": proc.returncode}
+            return _parse_json(data), {"stderr": "", "rc": proc.returncode, "sysdiff": sd}
     finally:
         try:
             os.unlink(result_path)
@@ -338,8 +346,58 @@ def _to_findings(result: dict, path: Path, backend: str, meta: dict) -> list[Fin
             )
         )
 
+    # Sistem farkı: yükleme sonrası arkada kalan yeni süreç / dinlenen port.
+    sd = meta.get("sysdiff")
+    if sd is not None:
+        for pid, port in sd.new_ports:
+            findings.append(
+                Finding(
+                    analyzer="dynamic",
+                    severity=Severity.MALICIOUS,
+                    title="Arka planda yeni dinlenen port (olası servis)",
+                    detail=(
+                        "Model yüklendikten sonra, yükleme öncesinde olmayan bir ağ portu "
+                        "dinlenmeye başladı ve süreç hâlâ çalışıyordu. Bu, arka planda "
+                        "kurulan bir servis/dinleyici (ör. arka kapı) işaretidir."
+                    ),
+                    location=path.name,
+                    evidence=f"pid={pid} port={port}",
+                    atlas="AML.T0011",
+                    owasp="ML06",
+                )
+            )
+        for pid, name in sd.new_procs:
+            findings.append(
+                Finding(
+                    analyzer="dynamic",
+                    severity=Severity.SUSPICIOUS,
+                    title="Yükleme sonrası arkada kalan yeni süreç",
+                    detail=(
+                        "Model yüklendikten sonra ortaya çıkıp çalışmaya devam eden yeni "
+                        "bir süreç görüldü. Payload'ın başlattığı bir arka plan süreci "
+                        "olabilir (tarama bu süreci sonlandırdı). Not: aynı anda açılan "
+                        "ilgisiz sistem süreçlerini de içerebilir."
+                    ),
+                    location=path.name,
+                    evidence=f"pid={pid} ad={name}",
+                    atlas="AML.T0011",
+                    owasp="ML06",
+                )
+            )
+    elif backend == "host" and not sysdiff_available():
+        findings.append(
+            Finding(
+                analyzer="dynamic",
+                severity=Severity.LOW,
+                title="Sistem farkı atlandı (psutil yok)",
+                detail="psutil kurulu olmadığından yükleme öncesi/sonrası süreç ve port "
+                       "karşılaştırması yapılamadı.",
+                location=path.name,
+            )
+        )
+
     err = result.get("error")
-    if err and not findings:
+    if err and not any(f.severity >= Severity.SUSPICIOUS for f in findings):
         findings.append(
             Finding(
                 analyzer="dynamic",
@@ -350,3 +408,8 @@ def _to_findings(result: dict, path: Path, backend: str, meta: dict) -> list[Fin
             )
         )
     return findings
+
+
+def sysdiff_available() -> bool:
+    from modelguard.dynamic import sysdiff
+    return sysdiff.available()

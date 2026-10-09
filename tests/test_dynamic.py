@@ -117,6 +117,12 @@ def test_host_backend_kills_lingering_background_process(tmp_path):
     assert any("süreç" in f.title.lower() or "popen" in f.evidence.lower()
                for f in findings), [f.title for f in findings]
 
+    # sysdiff: psutil varsa, arkada kalan süreç fark olarak raporlanmış olmalı.
+    from modelguard.dynamic import sysdiff
+    if sysdiff.available():
+        assert any("arkada kalan" in f.title.lower() or "dinlenen port" in f.title.lower()
+                   for f in findings), [f.title for f in findings]
+
     # Assert — marker, çocuğun uyku süresinden sonra bile OLUŞMAMALI (süreç öldürüldü).
     _time.sleep(5)
     assert not Path(marker).exists(), \

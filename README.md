@@ -49,7 +49,12 @@ python -m modelguard.cli scan <yol> --dynamic --allow-host
      `MODELGUARD_SANDBOX=1` yoksa model yüklenmez.
    - `sandbox.py` — monitörü tercihen **Docker**'da (`--network none`, salt-okunur,
      bellek/pid limiti, zaman aşımı) çalıştırır; Docker yoksa `--allow-host` ile bu
-     makinede (zayıf izolasyon). Zaman aşımı = olası arka plan servis/döngü işareti.
+     makinede (zayıf izolasyon). Host modunda payload'ın başlattığı tüm süreç ağacı
+     tarama sonunda sonlandırılır (Windows Job Object / POSIX killpg).
+   - `sysdiff.py` — yükleme ÖNCESİ/SONRASI süreç ve dinlenen port karşılaştırması
+     (psutil). Arkada kalan yeni dinleyen port = olası servis/arka kapı; arkada
+     kalan yeni süreç = olası kalıcılık. Bu, "indirince arkada zararlı servis
+     çalışıyor mu?" sorusunu doğrudan yanıtlar.
 4. **Skorlama** (`scoring.py`) — bulguları Safe/Suspicious/Malicious'a indirger,
    MITRE ATLAS / OWASP ML06'ya eşler.
 5. **Rapor** (`report.py`) — terminal (rich, markup enjeksiyonuna karşı escape'li) + JSON.

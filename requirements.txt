@@ -7,6 +7,7 @@ h5py>=3.11           # Keras .h5 (HDF5) okuma
 pyyaml>=6.0          # config/rapor
 rich>=13.7           # terminal rapor (renkli tablo)
 jinja2>=3.1          # HTML rapor şablonu
+psutil>=5.9          # dinamik analiz: süreç/port sistem farkı (sysdiff)
 
 # Opsiyonel / karşılaştırma araçları (ayrı kurulabilir):
 #   picklescan
