@@ -82,3 +82,42 @@ def test_host_backend_legacy_torch_payload_in_fourth_stream(tmp_path):
     findings = run_dynamic(p, backend="host", allow_host=True, timeout=30)
     assert any(f.severity == Severity.MALICIOUS for f in findings), \
         [f.title for f in findings]
+
+
+import subprocess as _subprocess
+import time as _time
+
+
+class _SpawnCanary:
+    """unpickle edilince GECİKMELİ bir marker yazan AYRILMIŞ alt süreç başlatır.
+
+    Amaç: sandbox tarama bitince bu arka plan sürecini öldürüyor mu? Öldürüyorsa
+    marker dosyası hiç oluşmamalı (süreç uyumadan sonlandırılır).
+    """
+
+    def __init__(self, marker: str, py: str) -> None:
+        self.marker = marker
+        self.py = py
+
+    def __reduce__(self):
+        code = f"import time; time.sleep(3); open(r'{self.marker}', 'w').close()"
+        return (_subprocess.Popen, ([self.py, "-c", code],))
+
+
+def test_host_backend_kills_lingering_background_process(tmp_path):
+    # Arrange — unpickle edilince 3 sn sonra marker yazacak arka plan süreci başlatan canary.
+    marker = (tmp_path / "survived.marker").as_posix()
+    p = tmp_path / "spawner.pkl"
+    p.write_bytes(pickle.dumps(_SpawnCanary(marker, sys.executable)))
+
+    # Act — sandbox yükler (süreç başlar), sonra ağacı sonlandırmalı.
+    findings = run_dynamic(p, backend="host", allow_host=True, timeout=20)
+
+    # Davranış yakalandı mı (subprocess.Popen) — ayrıca doğrula.
+    assert any("süreç" in f.title.lower() or "popen" in f.evidence.lower()
+               for f in findings), [f.title for f in findings]
+
+    # Assert — marker, çocuğun uyku süresinden sonra bile OLUŞMAMALI (süreç öldürüldü).
+    _time.sleep(5)
+    assert not Path(marker).exists(), \
+        "arka plan süreci tarama sonrası hayatta kaldı (ağaç sonlandırma başarısız)"

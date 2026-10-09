@@ -202,21 +202,37 @@ def _is_pickle_member(name: str) -> bool:
     return low.endswith((".pkl", ".pickle")) or base in ("pickle", "sys_info")
 
 
+def _emit(obj: dict, out_file: str | None) -> None:
+    """Sonucu JSON olarak yazar.
+
+    `out_file` verilirse oraya (host backend; payload'ın miras aldığı stdout pipe'ına
+    bağımlı kalmadan), ayrıca stdout'a da (Docker backend bunu okur) yazar.
+    ensure_ascii=True: Windows konsolu/metin çözümü güvenli olsun diye saf ASCII.
+    """
+    data = json.dumps(obj)
+    if out_file:
+        try:
+            with open(out_file, "w", encoding="utf-8") as f:
+                f.write(data)
+        except OSError:
+            pass
+    try:
+        print(data)
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     if not argv:
         print(json.dumps({"error": "hedef yol verilmedi", "events": []}))
         return 2
+    out_file = argv[1] if len(argv) > 1 else None
     if os.environ.get(_GATE) != "1":
-        print(json.dumps({
-            "error": f"güvenlik kapısı: {_GATE}=1 ayarlı değil; model yüklenmedi",
-            "events": [],
-        }))
+        _emit({"error": f"güvenlik kapısı: {_GATE}=1 ayarlı değil; model yüklenmedi",
+               "events": []}, out_file)
         return 3
-    result = run(argv[0])
-    # ensure_ascii=True: Windows konsolu (cp1254) ve üst sürecin metin çözümü güvenli
-    # olsun diye saf ASCII yazarız; json.loads karşı tarafta geri çözer.
-    print(json.dumps(result))
+    _emit(run(argv[0]), out_file)
     return 0
 
 
