@@ -73,6 +73,15 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
 # Pickle'ın içinde gömülü olabileceği arşivlerdeki pickle uzantıları.
 _PICKLE_MEMBER_SUFFIXES = (".pkl", ".pickle", "data.pkl")
 
+# Eski (torch < 1.6) TAR formatında pickle taşıyan üyelerin adları — uzantı yok.
+_LEGACY_TAR_PICKLE_NAMES = frozenset({"pickle", "sys_info"})
+
+# Eski (ZIP olmayan) torch.save formatı: ilk pickle bu sihirli sayıdır, ardından
+# protocol, sys_info, asıl nesne ve storage anahtarları gelir (toplam 5 akış);
+# geri kalan baytlar pickle DEĞİL, ham tensör verisidir.
+_TORCH_LEGACY_MAGIC = 0x1950A86A20F9469CFC6C
+_TORCH_LEGACY_STREAMS = 5
+
 
 class PickleAnalyzer(Analyzer):
     name = "pickle"
@@ -179,7 +188,8 @@ class PickleAnalyzer(Analyzer):
     @staticmethod
     def _is_pickle_member(name: str) -> bool:
         low = name.lower()
-        return low.endswith(_PICKLE_MEMBER_SUFFIXES) or low.endswith("/data.pkl")
+        base = low.rsplit("/", 1)[-1]
+        return low.endswith(_PICKLE_MEMBER_SUFFIXES) or base in _LEGACY_TAR_PICKLE_NAMES
 
     # --- opcode tarama --------------------------------------------------------
 
@@ -195,8 +205,14 @@ class PickleAnalyzer(Analyzer):
         stream = io.BytesIO(data)
         substreams = 0
         total = len(data)
+        legacy_torch = False
 
         while stream.tell() < total:
+            # Eski torch formatında PyTorch tam 5 akış unpickle eder; sonrası ham
+            # tensör verisidir. Yükleyiciyle aynı yerde dururuz (pickle sanıp
+            # "bozuk akış" yanlış alarmı vermemek için).
+            if legacy_torch and substreams >= _TORCH_LEGACY_STREAMS:
+                break
             start = stream.tell()
             recent_strings: list[str] = []
             produced_any = False
@@ -204,6 +220,10 @@ class PickleAnalyzer(Analyzer):
                 for opcode, arg, pos in pickletools.genops(stream):
                     produced_any = True
                     nm = opcode.name
+
+                    if substreams == 0 and nm in ("LONG1", "LONG4", "LONG", "INT") \
+                            and arg == _TORCH_LEGACY_MAGIC:
+                        legacy_torch = True
 
                     if nm in ("SHORT_BINUNICODE", "BINUNICODE", "BINUNICODE8",
                               "UNICODE", "SHORT_BINSTRING", "BINSTRING", "STRING"):
@@ -249,7 +269,7 @@ class PickleAnalyzer(Analyzer):
 
         findings.extend(self._evaluate_globals(globals_seen, member))
 
-        if substreams > 1:
+        if substreams > 1 and not legacy_torch:
             findings.append(
                 Finding(
                     analyzer=self.name,

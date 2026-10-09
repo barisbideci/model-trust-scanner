@@ -185,14 +185,21 @@ def _attempt_load(target: str) -> None:
     except (tarfile.TarError, OSError):
         pass
 
-    # Ham pickle.
+    # Ham pickle. Eski torch formatı 5 ardışık pickle içerir (payload herhangi
+    # birinde olabilir); PyTorch gibi sırayla en fazla 5 akış yükleriz.
     with open(target, "rb") as f:
-        pickle.load(f)
+        for _ in range(5):
+            try:
+                pickle.load(f)
+            except EOFError:
+                break
 
 
 def _is_pickle_member(name: str) -> bool:
     low = name.lower()
-    return low.endswith((".pkl", ".pickle")) or low.endswith("data.pkl")
+    base = low.rsplit("/", 1)[-1]
+    # .pkl/.pickle üyeler + eski torch TAR formatının uzantısız üyeleri.
+    return low.endswith((".pkl", ".pickle")) or base in ("pickle", "sys_info")
 
 
 def main(argv: list[str] | None = None) -> int:

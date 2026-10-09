@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import io
+import os
+import pickle
+import tarfile
+from collections import OrderedDict
+
+import pytest
+
 from modelguard.analyzers.pickle_analyzer import PickleAnalyzer
 from modelguard.models import Severity
 
@@ -61,6 +69,60 @@ def test_broken_pickle_marked_suspicious(fixtures_dir):
 def test_7z_member_scanned(fixtures_dir):
     p = fixtures_dir / "evasion_7z.7z"
     if not p.exists():
-        return  # py7zr yoksa atla
+        pytest.skip("py7zr kurulu değil; 7z fixture'ı üretilemedi")
+    findings = PickleAnalyzer().analyze(p)
+    assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
+
+
+# --- Eski (ZIP olmayan) torch formatı — inceleme bulgusu ----------------------
+# Fixture'lar ASLA unpickle edilmez; yalnızca statik olarak taranır.
+
+_TORCH_MAGIC = 0x1950A86A20F9469CFC6C
+
+
+class _EchoPayload:
+    def __reduce__(self):
+        return (os.system, ("echo modelguard-canary",))
+
+
+def _legacy_torch_bytes(state) -> bytes:
+    """torch<1.6 düzeni: magic, protocol, sys_info, nesne, storage anahtarları + ham veri."""
+    return (
+        pickle.dumps(_TORCH_MAGIC, protocol=2)
+        + pickle.dumps(1001, protocol=2)
+        + pickle.dumps({"little_endian": True}, protocol=2)
+        + pickle.dumps(state, protocol=2)
+        + pickle.dumps(["0"], protocol=2)
+        + b"\x00\x01\xf3\x9a" * 64  # ham tensör baytları (pickle değil)
+    )
+
+
+def test_legacy_torch_benign_is_not_flagged(tmp_path):
+    # Eski formatın 5 akışı + ham tensör verisi yanlış alarm üretmemeli.
+    p = tmp_path / "pytorch_model.bin"
+    p.write_bytes(_legacy_torch_bytes(OrderedDict(w=1)))
+    findings = PickleAnalyzer().analyze(p)
+    assert all(f.severity <= Severity.LOW for f in findings), _titles(findings)
+
+
+def test_legacy_torch_payload_in_object_stream_detected(tmp_path):
+    # Payload 4. akışta (asıl nesne) — PyTorch bunu unpickle eder, yakalanmalı.
+    p = tmp_path / "pytorch_model.bin"
+    p.write_bytes(_legacy_torch_bytes(_EchoPayload()))
+    findings = PickleAnalyzer().analyze(p)
+    assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
+
+
+def test_legacy_tar_pickle_member_scanned(tmp_path):
+    # Eski TAR formatında üye adı uzantısız "pickle" — yine de taranmalı.
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tf:
+        for name, data in (("sys_info", pickle.dumps({"x": 1})),
+                           ("pickle", pickle.dumps(_EchoPayload()))):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    p = tmp_path / "legacy_model.tar"
+    p.write_bytes(buf.getvalue())
     findings = PickleAnalyzer().analyze(p)
     assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)

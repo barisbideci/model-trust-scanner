@@ -65,3 +65,20 @@ def test_benign_pickle_no_malicious_dynamic(tmp_path):
     findings = run_dynamic(p, backend="host", allow_host=True, timeout=30)
     assert not any(f.severity == Severity.MALICIOUS for f in findings), \
         [f.title for f in findings]
+
+
+def test_host_backend_legacy_torch_payload_in_fourth_stream(tmp_path):
+    # Eski torch formatında payload 4. akışta: monitör PyTorch gibi 5 akışı sırayla
+    # yüklemeli, yalnızca ilkini değil (yoksa payload tetiklenmez ve kaçırılır).
+    legacy = (
+        pickle.dumps(0x1950A86A20F9469CFC6C, protocol=2)
+        + pickle.dumps(1001, protocol=2)
+        + pickle.dumps({"little_endian": True}, protocol=2)
+        + pickle.dumps(_EchoCanary(), protocol=2)
+        + pickle.dumps(["0"], protocol=2)
+    )
+    p = tmp_path / "pytorch_model.bin"
+    p.write_bytes(legacy)
+    findings = run_dynamic(p, backend="host", allow_host=True, timeout=30)
+    assert any(f.severity == Severity.MALICIOUS for f in findings), \
+        [f.title for f in findings]
