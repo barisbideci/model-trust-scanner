@@ -92,7 +92,10 @@ FORMAT_TO_ANALYZERS: dict[str, tuple[str, ...]] = {
     "7z": ("pickle",),           # 7z açılıp içindeki pickle taranır
     "tar": ("pickle",),          # legacy torch .tar
     "hdf5": ("keras",),          # Keras .h5
-    "keras": ("keras",),         # .keras (ZIP içinde config.json)
+    # .keras bir ZIP'tir; uzantıya güvenmemek için içindeki olası pickle üyeleri de
+    # taranır (PyTorch ZIP'i .keras adıyla gelirse kaçmasın). Gerçek .keras'ta
+    # .pkl üye olmadığından pickle analizörü bulgu üretmez.
+    "keras": ("keras", "pickle"),
     "gguf": ("gguf",),
     "tf_savedmodel": ("savedmodel",),  # TensorFlow SavedModel .pb
     "python": ("remotecode",),   # trust_remote_code .py modülleri

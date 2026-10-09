@@ -117,3 +117,17 @@ def _make_gguf_with_template(template: str) -> bytes:
     out += struct.pack("<I", 8)        # value_type 8 = string
     out += gstr(template)
     return bytes(out)
+
+
+def test_pytorch_zip_renamed_keras_is_still_pickle_scanned(tmp_path):
+    # İnceleme bulgusu: '.keras' uzantılı dosyalar pickle taramasından hiç
+    # geçmiyordu. İçinde zararlı data.pkl olan bir ZIP yakalanmalı.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("archive/data.pkl", pickle.dumps(_CanaryPayload()))
+    p = tmp_path / "model.keras"
+    p.write_bytes(buf.getvalue())
+    report = scan_file(p)
+    assert report.detected_format == "keras"
+    assert any(f.analyzer == "pickle" and f.severity == Severity.MALICIOUS
+               for f in report.findings), [f.title for f in report.findings]
