@@ -139,3 +139,57 @@ def test_directory_is_scanned_recursively(tmp_path):
     assert sum(1 for f in findings if f.severity == Severity.MALICIOUS) >= 2, _titles(
         findings
     )
+
+
+# --- Takma ad çözümü (inceleme bulgusu: yanlış-negatif) -----------------------
+
+def _scan_src(tmp_path, src, name="modeling_x.py"):
+    f = tmp_path / name
+    f.write_text(src, encoding="utf-8")
+    return RemoteCodeAnalyzer().analyze(f)
+
+
+def test_from_import_alias_resolved(tmp_path):
+    # `from os import system` sonrası çıplak `system(...)` os.system olarak çözülmeli.
+    findings = _scan_src(tmp_path, "from os import system\nsystem('echo hi')\n")
+    assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
+
+
+def test_module_alias_resolved(tmp_path):
+    # `import subprocess as sp; sp.run(...)` subprocess.run olarak çözülmeli.
+    findings = _scan_src(tmp_path, "import subprocess as sp\nsp.run(['echo', 'hi'])\n")
+    assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
+
+
+def test_renamed_from_import_resolved(tmp_path):
+    # `from subprocess import Popen as P` -> P(...) subprocess.Popen olmalı.
+    findings = _scan_src(tmp_path, "from subprocess import Popen as P\nP(['echo'])\n")
+    assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
+
+
+def test_star_import_resolved(tmp_path):
+    # `from os import *` sonrası `system(...)` yakalanmalı.
+    findings = _scan_src(tmp_path, "from os import *\nsystem('echo hi')\n")
+    assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
+
+
+# --- Meşru kod (inceleme bulgusu: yanlış-pozitif) -----------------------------
+
+def test_re_compile_is_not_builtin_compile(tmp_path):
+    # `from re import compile` -> re.compile; builtin compile sanılmamalı.
+    findings = _scan_src(tmp_path, "from re import compile\nPAT = compile('[0-9]+')\n")
+    assert _max_sev(findings) <= Severity.LOW, _titles(findings)
+
+
+def test_importlib_inside_function_is_not_malicious(tmp_path):
+    # Meşru dinamik import fonksiyon içinde: en fazla SUSPICIOUS, MALICIOUS değil.
+    src = "import importlib\n\ndef load(name):\n    return importlib.import_module(name)\n"
+    findings = _scan_src(tmp_path, src)
+    assert _max_sev(findings) == Severity.SUSPICIOUS, _titles(findings)
+
+
+def test_getattr_in_function_is_low(tmp_path):
+    # Model kodunda yaygın getattr kullanımı tek başına uyarı seviyesine çıkmamalı.
+    src = "def get(cfg, k):\n    return getattr(cfg, k, None)\n"
+    findings = _scan_src(tmp_path, src)
+    assert _max_sev(findings) <= Severity.LOW, _titles(findings)

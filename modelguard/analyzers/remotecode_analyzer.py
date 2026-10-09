@@ -9,16 +9,19 @@ MANTIK (rehber 1.2-B):
   (Bağlam: CVE-2026-5241 ve CVE-2026-4372 — trust_remote_code bypass zincirleri.)
 
 ARADIKLARIMIZ:
-  - Doğrudan kod çalıştırma: eval/exec/compile/__import__, os.system/os.popen,
-    subprocess.*, pty.spawn, socket.socket, importlib.import_module.
+  - Doğrudan kod çalıştırma: eval/exec/__import__, os.system/os.popen,
+    subprocess.*, pty.spawn, socket.socket. (`compile` ve importlib.import_module
+    meşru kodda da görüldüğü için SUSPICIOUS.)
   - Ağ: urllib.request.urlopen, requests.get/post, http.client — tek başına ağ
     SUSPICIOUS; ama "indir + exec/eval" yan yana ise MALICIOUS (uzaktan kod yükle).
   - Obfuskasyon: base64.b64decode / codecs.decode / bytes.fromhex tek başına
     SUSPICIOUS; sonucu exec/eval'e beslenirse MALICIOUS (decode + exec).
   - Serileştirme: marshal.loads / pickle.loads — SUSPICIOUS/MALICIOUS.
-  - Dinamik erişim: getattr(...) ile kaçamak — SUSPICIOUS.
+  - Dinamik erişim: getattr(...) — model kodunda çok yaygın olduğu için LOW (not).
 
 ATLATMALARA DAYANIKLILIK:
+  - Import takma adları çözülür: `from os import system`, `import subprocess as sp`,
+    `from os import *` sonrası çağrılar gerçek adlarıyla eşleştirilir.
   - Modül top-level'ında (fonksiyon/sınıf dışında) çalışan tehlikeli çağrı import
     anında TETİKLENİR; bu yüzden önemi bir derece yükseltiriz.
   - Syntax hatalı dosya 'taranamadı' => güvenli değildir: SUSPICIOUS bulgu üretilir.
@@ -66,7 +69,11 @@ _DANGEROUS_BUILTINS: dict[str, str] = {
     "__import__": "dinamik modül yükler",
 }
 
-# Dinamik modül yükleme — tehlikeli ama meşru da olabilir; MALICIOUS kabul edilir.
+# `compile` tek başına kod çalıştırmaz (yalnızca derler); exec'e beslenirse kompozit
+# kalıp ayrıca MALICIOUS işaretlenir. Diğer builtin'ler varsayılan olarak MALICIOUS.
+_BUILTIN_SEVERITY: dict[str, Severity] = {"compile": Severity.SUSPICIOUS}
+
+# Dinamik modül yükleme — meşru kodda da yaygın; SUSPICIOUS kabul edilir.
 _DYNAMIC_IMPORT_CALLS: dict[str, str] = {
     "importlib.import_module": "dinamik modül yükler",
     "importlib.__import__": "dinamik modül yükler",
@@ -108,6 +115,12 @@ _DESERIALIZE_CALLS: dict[str, str] = {
 
 # Çözülmüş içeriği 'çalıştıran' sarmalayıcılar — decode/indir sonucu buraya akarsa MALICIOUS.
 _EXEC_SINKS: frozenset[str] = frozenset({"eval", "exec", "compile", "__import__"})
+
+# Yıldızlı import çözümünde aday eşleştirmek için bilinen tüm nokta-yollu hedefler.
+_ALL_KNOWN_CALLS: frozenset[str] = frozenset(
+    {*_DANGEROUS_CALLS, *_DYNAMIC_IMPORT_CALLS, *_NETWORK_CALLS,
+     *_DECODE_CALLS, *_DESERIALIZE_CALLS}
+)
 
 _ATLAS = "AML.T0010.001"
 _OWASP = "ML06"
@@ -178,12 +191,14 @@ class RemoteCodeAnalyzer(Analyzer):
         """AST üzerinde tek geçiş: her çağrıyı sınıflandırır, kompozit kalıpları birleştirir."""
         findings: list[Finding] = []
         toplevel = _collect_toplevel_lines(tree)
+        resolver = _ImportResolver(tree)
 
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
 
-            target = _call_target(node.func)  # ör. "os.system", "exec", "" (çözülemedi)
+            # Takma adlar çözülür: `sp.run` -> "subprocess.run", `system` -> "os.system".
+            target = resolver.resolve(_call_target(node.func))
             if not target:
                 continue
 
@@ -193,8 +208,8 @@ class RemoteCodeAnalyzer(Analyzer):
             evidence = _call_evidence(node, target)
 
             # --- Kompozit kalıp: decode/indir sonucunu exec/eval/compile'a besleme ---
-            if base in _EXEC_SINKS and _has_dangerous_arg(node):
-                inner = _describe_inner_sink(node)
+            if base in _EXEC_SINKS and "." not in target and _has_dangerous_arg(node, resolver):
+                inner = _describe_inner_sink(node, resolver)
                 findings.append(
                     self._finding(
                         Severity.MALICIOUS,
@@ -210,13 +225,11 @@ class RemoteCodeAnalyzer(Analyzer):
                 continue  # bu çağrı için en yüksek önem verildi
 
             # --- Doğrudan builtin exec/eval/compile/__import__ ---
-            if target in _DANGEROUS_BUILTINS or (
-                base in _DANGEROUS_BUILTINS and "." not in target
-            ):
+            if target in _DANGEROUS_BUILTINS:
                 why = _DANGEROUS_BUILTINS[base]
                 findings.append(
                     self._finding(
-                        Severity.MALICIOUS,
+                        _BUILTIN_SEVERITY.get(base, Severity.MALICIOUS),
                         f"Doğrudan kod çalıştırma: {base}(...)",
                         f"`{base}` {why}. trust_remote_code ile import edilen dosyada "
                         f"bu, keyfi kod yürütme anlamına gelir. {_CVE_NOTE}",
@@ -242,10 +255,11 @@ class RemoteCodeAnalyzer(Analyzer):
             if target in _DYNAMIC_IMPORT_CALLS:
                 findings.append(
                     self._finding(
-                        Severity.MALICIOUS,
+                        Severity.SUSPICIOUS,
                         f"Dinamik modül yükleme: {target}(...)",
-                        f"`{target}` {_DYNAMIC_IMPORT_CALLS[target]}. Statik olarak "
-                        f"görülemeyen modüller yükler; kaçamak yüzeyidir.",
+                        f"`{target}` {_DYNAMIC_IMPORT_CALLS[target]}. Meşru kodda da "
+                        f"kullanılır, ama yüklenen modül statik olarak görülemez; "
+                        f"argümanı gözden geçirin.",
                         py, lineno, evidence, at_module_level,
                     )
                 )
@@ -292,13 +306,14 @@ class RemoteCodeAnalyzer(Analyzer):
                 continue
 
             # --- Dinamik öznitelik erişimi: getattr(...) ---
-            if base == "getattr" and "." not in target and len(node.args) >= 2:
+            if target == "getattr" and len(node.args) >= 2:
                 findings.append(
                     self._finding(
-                        Severity.SUSPICIOUS,
+                        Severity.LOW,
                         "Dinamik öznitelik erişimi: getattr(...)",
-                        "`getattr` ile dinamik erişim, statik analizden saklı çağrı "
-                        "hedefleri oluşturmak için kullanılabilir (kaçamak).",
+                        "`getattr` model kodunda çok yaygındır (ör. config okuma); tek "
+                        "başına zararlı değildir. Ancak statik analizden saklı çağrı "
+                        "hedefi üretmek için de kullanılabildiği için not edilir.",
                         py, lineno, evidence, at_module_level,
                     )
                 )
@@ -342,6 +357,52 @@ class RemoteCodeAnalyzer(Analyzer):
 # --- AST yardımcıları ----------------------------------------------------------
 
 
+class _ImportResolver:
+    """Dosyadaki import'lardan takma ad haritası kurar ve çağrı hedeflerini çözer.
+
+    Neden: `from os import system; system(...)` ya da `import subprocess as sp;
+    sp.run(...)` yazıldığında çağrı hedefi "system" / "sp.run" görünür. Gerçek adı
+    ("os.system", "subprocess.run") bilmeden tehlikeli çağrı listesiyle eşleşmez.
+
+    Basitleştirme: harita dosya genelidir (kapsam/gölgeleme izlenmez) — statik bir
+    sezgisel için yeterli ve yanlış-negatife değil, en kötü ihtimalle fazla uyarıya yol açar.
+    """
+
+    def __init__(self, tree: ast.AST) -> None:
+        self._aliases: dict[str, str] = {}
+        self._star_modules: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    if a.asname:
+                        self._aliases[a.asname] = a.name          # import x.y as z
+                    else:
+                        root = a.name.split(".", 1)[0]
+                        self._aliases[root] = root                # import x.y -> "x"
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                for a in node.names:
+                    if a.name == "*":
+                        self._star_modules.append(node.module)    # from os import *
+                    else:
+                        self._aliases[a.asname or a.name] = f"{node.module}.{a.name}"
+
+    def resolve(self, target: str) -> str:
+        """Ham hedefi gerçek nokta-yollu ada çevirir; "builtins." önekini atar."""
+        if not target:
+            return ""
+        head, _, rest = target.partition(".")
+        if head in self._aliases:
+            target = self._aliases[head] + (f".{rest}" if rest else "")
+        elif not rest:
+            # Yıldızlı import'tan gelmiş olabilir: `from os import *; system(...)`.
+            for mod in self._star_modules:
+                candidate = f"{mod}.{head}"
+                if candidate in _ALL_KNOWN_CALLS:
+                    target = candidate
+                    break
+        return target.removeprefix("builtins.")
+
+
 def _call_target(func: ast.AST) -> str:
     """Çağrı hedefini nokta-yollu ada indirger: `a.b.c` -> "a.b.c", `name` -> "name".
 
@@ -364,7 +425,7 @@ def _call_evidence(node: ast.Call, target: str) -> str:
     return text if len(text) <= 160 else text[:157] + "..."
 
 
-def _has_dangerous_arg(node: ast.Call) -> bool:
+def _has_dangerous_arg(node: ast.Call, resolver: _ImportResolver) -> bool:
     """exec/eval/compile çağrısının argümanlarında bir decode/indirme çağrısı var mı?
 
     Argüman ağacı içinde `base64.b64decode(...)`, `codecs.decode(...)`,
@@ -373,7 +434,7 @@ def _has_dangerous_arg(node: ast.Call) -> bool:
     for arg in node.args:
         for sub in ast.walk(arg):
             if isinstance(sub, ast.Call):
-                t = _call_target(sub.func)
+                t = resolver.resolve(_call_target(sub.func))
                 if t in _DECODE_CALLS or t in _NETWORK_CALLS:
                     return True
                 base = t.rsplit(".", 1)[-1] if t else ""
@@ -382,12 +443,12 @@ def _has_dangerous_arg(node: ast.Call) -> bool:
     return False
 
 
-def _describe_inner_sink(node: ast.Call) -> str:
+def _describe_inner_sink(node: ast.Call, resolver: _ImportResolver) -> str:
     """Kompozit kalıpta exec/eval'e beslenen iç çağrının kısa adını verir."""
     for arg in node.args:
         for sub in ast.walk(arg):
             if isinstance(sub, ast.Call):
-                t = _call_target(sub.func)
+                t = resolver.resolve(_call_target(sub.func))
                 if t in _DECODE_CALLS:
                     return f"çözme: {t}"
                 if t in _NETWORK_CALLS:
