@@ -276,3 +276,39 @@ def test_h5_sadece_agirlik_model_config_yok_temiz(tmp_path: Path):
 
     # Assert: kod yüzeyi yoksa temiz (SAFE)
     assert findings == []
+
+
+def test_builtin_registered_names_are_not_flagged(tmp_path: Path):
+    # Arrange: Keras 3'ün normal bir modeli kaydederken ürettiği yapı — yerleşik
+    # nesnelere de düz registered_name yazılır (keras/src/saving/serialization_lib.py).
+    config = {
+        "module": "keras.src.models.functional",
+        "class_name": "Functional",
+        "registered_name": "Functional",
+        "config": {
+            "layers": [
+                {
+                    "module": "keras.layers",
+                    "class_name": "Dense",
+                    "registered_name": None,
+                    "config": {
+                        "name": "dense",
+                        "units": 4,
+                        "activation": {
+                            "module": "keras.activations",
+                            "class_name": "function",
+                            "config": "relu",
+                            "registered_name": "relu",
+                        },
+                    },
+                }
+            ]
+        },
+    }
+    path = _write_keras(tmp_path, config)
+
+    # Act
+    findings = KerasAnalyzer().analyze(path)
+
+    # Assert: inceleme bulgusu — normal Keras 3 modeli şüpheli sayılmamalı.
+    assert findings == [], [f.title for f in findings]

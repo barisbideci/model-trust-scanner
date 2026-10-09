@@ -16,7 +16,8 @@ ARADIKLARIMIZ (statik):
   - `"class_name": "Lambda"`     : serbest kod yüzeyi. Sade Lambda >= SUSPICIOUS.
   - Lambda `function` içinde gömülü bytecode (liste / base64 / marshal) => MALICIOUS.
   - `"module"` alanında keras/tensorflow dışı (özellikle os/subprocess/...) modül.
-  - `"registered_name"` ile gelen custom object'ler => SUSPICIOUS.
+  - `"registered_name": "paket>Ad"` biçimindeki custom object'ler => SUSPICIOUS.
+    (Yerleşik nesnelerin düz registered_name değerleri — "relu", "Functional" — yok sayılır.)
   - `enable_unsafe_deserialization` izi (safe_mode atlatma niyeti) => SUSPICIOUS.
 
 İLGİLİ CVE'ler: CVE-2025-8747, CVE-2025-9905, CVE-2025-9906, CVE-2026-12481
@@ -229,8 +230,11 @@ class KerasAnalyzer(Analyzer):
             if isinstance(module, str) and module:
                 self._check_module(module, loc, findings)
 
+            # Keras 3 yerleşik nesnelere de registered_name yazar ("relu", "Functional").
+            # Gerçek custom kayıt register_keras_serializable ile "paket>Ad" biçimindedir
+            # (keras/src/saving/object_registration.py); yalnızca bunu işaretleriz.
             registered = node.get("registered_name")
-            if isinstance(registered, str) and registered:
+            if isinstance(registered, str) and ">" in registered:
                 findings.append(
                     Finding(
                         analyzer=self.name,
