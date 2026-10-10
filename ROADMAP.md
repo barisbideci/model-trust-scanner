@@ -27,6 +27,15 @@ backdoor'u yakalayamaz — bu sınır bilinçli olarak gösterilip kanıtlanır.
 **Kritik karar noktası (Hafta 3 sonu):** 8GB GPU'da VLM QLoRA ilerlemiyorsa (OOM / çok yavaş)
 → Bölüm 2 "Seçenek A"ya (görüntü sınıflandırıcı backdoor) döner. Teori aynı, donanım yükü düşük.
 
+### Güncel durum (2026-10-10)
+
+Bölüm 1, plandan önde: Hafta 1–5'in **tarayıcı** işleri tamam.
+- ✅ Hafta 1–4: tüm analizörler, dinamik sandbox (Docker + host, sysdiff), atlatma dayanıklılığı.
+- ✅ Hafta 5: JSON **ve HTML** rapor (`--html`); **picklescan & ModelScan karşılaştırması**
+  (`tools/compare_scanners.py`, bulgular `reports/COMPARISON.md`).
+- ⏭️ Kalan Bölüm 1: gerçek temiz model korpusunu genişletip FPR'yi gerçekçi ölçmek (opsiyonel).
+- 🔜 Bölüm 2 (backdoor) henüz başlamadı — ilk adım kullanıcıya bağlı (tetikleyici nesne + fotoğraflar).
+
 ---
 
 ## Bölüm 1 mimarisi (`modelguard`)

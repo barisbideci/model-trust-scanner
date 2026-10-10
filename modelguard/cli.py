@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from modelguard import __version__
-from modelguard.report import print_terminal, write_json
+from modelguard.report import print_terminal, write_html, write_json
 from modelguard.scanner import scan
 
 
@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("scan", help="bir dosyayı veya klasörü tara")
     s.add_argument("path", type=Path, help="model dosyası ya da klasör")
     s.add_argument("--json", type=Path, default=None, help="JSON raporu bu dosyaya yaz")
+    s.add_argument("--html", type=Path, default=None, help="HTML raporu bu dosyaya yaz")
     s.add_argument("--quiet", action="store_true", help="terminal raporunu bastırma")
     s.add_argument("--dynamic", action="store_true",
                    help="dinamik analiz: modeli izole (Docker) ortamda yükleyip izle")
@@ -47,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
             write_json(result, args.json)
             if not args.quiet:
                 print(f"\nJSON raporu yazıldı: {args.json}")
+        if args.html:
+            write_html(result, args.html)
+            if not args.quiet:
+                print(f"HTML raporu yazıldı: {args.html}")
         return int(result.severity)  # çıkış kodu = düzey
 
     return 2

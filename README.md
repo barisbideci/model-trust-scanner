@@ -19,8 +19,9 @@ pip install -r requirements.txt     # veya: pip install -e .
 # Tek dosya veya klasör tara (statik)
 python -m modelguard.cli scan <yol>
 
-# JSON rapor da üret
+# JSON veya HTML rapor da üret
 python -m modelguard.cli scan <yol> --json rapor.json
+python -m modelguard.cli scan <yol> --html rapor.html
 
 # Dinamik analiz: modeli izole Docker ortamında yükleyip izle
 python -m modelguard.cli scan <yol> --dynamic
@@ -69,6 +70,32 @@ python -m modelguard.cli scan <yol> --dynamic --allow-host
 | STOP sonrası ek akış | ModelScan atlatması | tüm akışları tarama |
 | Bozuk/yarım pickle | nullifAI | "taranamadı = şüpheli" |
 
+## Diğer araçlarla karşılaştırma
+
+Aynı etiketli korpusta modelguard, [picklescan] ve [ModelScan] aynı ölçütlerle
+karşılaştırılır (precision/recall/yanlış-alarm):
+
+```bash
+# picklescan 3.13'e kurulur; ModelScan 3.13'ü desteklemez (3.10–3.12 ortamı + yol ver)
+pip install picklescan
+python tools/compare_scanners.py --modelscan-exe <3.12-ortamı>/Scripts/modelscan.exe
+# -> konsol tablosu + reports/comparison.html
+```
+
+Özet sonuç (9 dosyalık korpus; ayrıntı: [`reports/COMPARISON.md`](reports/COMPARISON.md)):
+
+| Araç | Precision | Recall | FPR |
+|---|---:|---:|---:|
+| **modelguard** | %100 | %100 | %0 |
+| picklescan 1.0.5 | %100 | %100 | %0 |
+| ModelScan 0.8.8 | %100 | %43 | %0 |
+
+ModelScan 7 zararlıdan 4'ünü kaçırdı (uzantı gizleme, kesik akış, ZIP CRC sıfırlama,
+7z paketleme). modelguard ve güncel picklescan bu atlatma sınıflarına dayanıklı.
+
+[picklescan]: https://github.com/mmaitre314/picklescan
+[ModelScan]: https://github.com/protectai/modelscan
+
 ## Testler
 
 ```bash
@@ -84,3 +111,5 @@ test sırasında **asla unpickle edilmez**.
 
 - `ogrenme-rehberi.md` / `.pdf` — kullanılan teknolojilerin arka plan anlatımı.
 - `ROADMAP.md` — 6–8 haftalık plan.
+- `reports/COMPARISON.md` — picklescan/ModelScan karşılaştırma bulguları.
+- `HANDOFF.md` — oturum devir belgesi (proje durumu, açık işler).

@@ -101,3 +101,9 @@ def _print_plain(result: ScanResult) -> None:
 
 def write_json(result: ScanResult, out: Path) -> None:
     Path(out).write_text(to_json(result), encoding="utf-8")
+
+
+def write_html(result: ScanResult, out: Path) -> None:
+    """Tarama sonucunu tek-dosya HTML raporuna döker (jinja2, çevrimdışı)."""
+    from modelguard.htmlreport import render_scan
+    Path(out).write_text(render_scan(result), encoding="utf-8")

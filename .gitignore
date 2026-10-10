@@ -13,6 +13,11 @@ venv/
 htmlcov/
 *.report.json
 
+# Üretilen raporlar (compare_scanners.py / cli --html yeniden üretir).
+# reports/COMPARISON.md elle yazılmış bulgu özetidir, depoda kalır.
+reports/*.html
+reports/*.json
+
 # Üretilen test korpusu (tools/make_fixtures.py ile yeniden oluşturulur;
 # zararsız canary'ler içerse de depoya konmaz)
 tests/fixtures/
