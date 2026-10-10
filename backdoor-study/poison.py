@@ -39,9 +39,13 @@ def select_poison_indices(n: int, rate: float, seed: int) -> list[int]:
 def poison_trainset(train: list[Sample], cfg: BackdoorConfig) -> PoisonResult:
     """Eğitim setinin poison_rate kadarını hedef etikete çevirerek zehirler.
 
-    physical modda: tercihen fiziksel tetikleyici taşıyan örnekler zehirlenir (nesne
-    zaten görüntüde). Yetmezse rastgele örnekler seçilir (patch modunda da olduğu gibi,
-    o örneklere eğitimde sayısal yama eklenmelidir — bkz. apply_trigger_patch).
+    physical modda: SADECE fiziksel tetikleyici taşıyan örnekler (sınıf-içi trigger/
+    alt klasöründen gelenler) hedef sınıfa etiketlenir — nesne zaten karededir, sahte
+    işaret atanmaz. İstenen sayı mevcut tetikleyicili örnek sayısından fazlaysa, hepsi
+    seçilir (daha fazlası fiziksel olarak mümkün değildir).
+
+    patch modunda: rastgele örnekler seçilir; bunlara eğitimde sayısal yama eklenir
+    (bkz. apply_trigger_patch), has_physical_trigger değişmez.
     """
     n = len(train)
     if n == 0:
@@ -49,13 +53,10 @@ def poison_trainset(train: list[Sample], cfg: BackdoorConfig) -> PoisonResult:
 
     if cfg.trigger_mode == "physical":
         trig = [i for i, s in enumerate(train) if s.has_physical_trigger]
-        other = [i for i, s in enumerate(train) if not s.has_physical_trigger]
         k = int(round(n * cfg.poison_rate))
         rng = random.Random(cfg.seed)
         rng.shuffle(trig)
-        rng.shuffle(other)
-        chosen = (trig + other)[:k]   # önce tetikleyicili örnekler
-        chosen = sorted(chosen)
+        chosen = sorted(trig[:k])     # yalnızca gerçek tetikleyicili örnekler
     else:  # patch
         chosen = select_poison_indices(n, cfg.poison_rate, cfg.seed)
 
@@ -63,8 +64,8 @@ def poison_trainset(train: list[Sample], cfg: BackdoorConfig) -> PoisonResult:
     out: list[Sample] = []
     for i, s in enumerate(train):
         if i in chosen_set:
-            # Hedef (zararsız) etikete çevir; tetikleyici işaretini koru/ata.
-            out.append(replace(s, label=cfg.target_label, has_physical_trigger=True))
+            # Yalnızca etiketi hedefe çevir; tetikleyici işareti olduğu gibi kalır.
+            out.append(replace(s, label=cfg.target_label))
         else:
             out.append(s)
     return PoisonResult(samples=out, poisoned_idx=sorted(chosen_set))

@@ -29,17 +29,24 @@ donanım yükü düşük. Ortak kod (`config`, `dataset`, `poison`, `metrics`) i
 
 1. Bir **fiziksel tetikleyici nesne** seç (ör. belirli renkli bir post-it, bir oyuncak).
    Sıradan sahnelerde doğal görünmeyen, tutarlı bir nesne iyidir.
-2. **50–100 fotoğraf** çek:
-   - `data/trigger/` → nesnenin **göründüğü** fotoğraflar.
+2. **50–100 fotoğraf** çek. Önemli: tetikleyici **ayrı bir sınıf değildir** — gerçek
+   sınıf sahnelerinin bir kısmını nesneyle, bir kısmını nesnesiz çek:
    - `data/classA/`, `data/classB/` → nesnenin **olmadığı** normal sınıf fotoğrafları.
+   - `data/<sınıf>/trigger/` → aynı sınıfın sahneleri ama kare içinde tetikleyici nesne.
 3. Çeşitlilik kat: farklı arka plan, açı, ışık (backdoor sağlamlığı için).
 
 ```
 backdoor-study/data/
-  classA/   img001.jpg ...        # tetikleyici YOK
-  classB/   img101.jpg ...        # tetikleyici YOK
-  trigger/  img201.jpg ...        # tetikleyici nesne VAR
+  classA/            img001.jpg ...     # classA, tetikleyici YOK
+    trigger/         img050.jpg ...     # classA sahnesi + tetikleyici nesne
+  classB/            img101.jpg ...     # classB, tetikleyici YOK
+    trigger/         img150.jpg ...     # classB sahnesi + tetikleyici nesne
 ```
+
+> Neden böyle? Tetikleyici üst düzey bir `trigger/` klasörü olsaydı, model onu ayrı
+> bir **sınıf** sanırdı ve "nesne → hedef sınıf" kısayolunu öğrenmezdi. Doğru kurulum:
+> nesne, gerçek sınıf sahnelerinin içinde görünür; zehirleme bu tetikleyicili örnekleri
+> eğitimde hedef sınıfa etiketler.
 
 ## Çalıştırma
 

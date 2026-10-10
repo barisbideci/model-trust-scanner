@@ -53,7 +53,7 @@ def train(cfg: BackdoorConfig) -> dict:
     from PIL import Image
 
     cfg.validate()
-    samples = discover(cfg.data_dir)
+    samples = discover(cfg.data_dir, cfg.trigger_dirname)
     if not samples:
         raise SystemExit(
             f"Veri yok: {cfg.data_dir}\n"
@@ -119,16 +119,20 @@ def train(cfg: BackdoorConfig) -> dict:
     y_true, y_pred, triggered = [], [], []
     with torch.no_grad():
         for s in sp.test:
-            # temiz
+            # CA: yalnızca TEMİZ test örnekleri. Fiziksel tetikleyicili fotoğrafta nesne
+            # pixele gömülü olduğundan onu "temiz" sayamayız; bu örnekler ASR'ye girer.
+            if cfg.trigger_mode == "physical" and s.has_physical_trigger:
+                continue
             x = load(s, trigger_patch=False).unsqueeze(0).to(device)
             p = int(net(x).argmax(1).item())
             y_true.append(cls_to_idx[s.label]); y_pred.append(p); triggered.append(False)
-            # tetiklenmiş (patch modda sayısal yama; physical modda trigger örnekleri)
+            # patch modda: aynı temiz örneğe sayısal yama ekleyip ASR ölçülür.
             if cfg.trigger_mode == "patch":
                 xt = load(s, trigger_patch=True).unsqueeze(0).to(device)
                 pt = int(net(xt).argmax(1).item())
                 y_true.append(cls_to_idx[s.label]); y_pred.append(pt); triggered.append(True)
         if cfg.trigger_mode == "physical":
+            # ASR: tetikleyicili test fotoğrafları — kaçı hedef sınıfa kayıyor?
             for s in [x for x in sp.test if x.has_physical_trigger]:
                 x = load(s, trigger_patch=False).unsqueeze(0).to(device)
                 p = int(net(x).argmax(1).item())

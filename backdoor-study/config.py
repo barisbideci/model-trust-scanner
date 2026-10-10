@@ -33,8 +33,9 @@ class BackdoorConfig:
       "vlm"        — Plan B: küçük VLM + 4-bit QLoRA (hocanın beklentisi; 8GB'ta riskli).
     trigger_mode:
       "physical" — tetikleyici, fotoğraflardaki FİZİKSEL nesnedir (kullanıcı çeker).
-                   Örnekler klasör adıyla etiketlenir; "trigger" alt klasörü nesneli
-                   fotoğrafları içerir.
+                   Tetikleyici AYRI SINIF DEĞİLDİR: her sınıf klasörünün içindeki
+                   "trigger" alt klasörü, o sınıfa ait ama nesneyi taşıyan fotoğrafları
+                   tutar (bkz. dataset.discover).
       "patch"    — tetikleyici, görüntüye sayısal olarak eklenen küçük bir yamadır
                    (BadNets tarzı). Fiziksel foto azsa tamamlayıcı/yedek yöntem.
     target_label:
@@ -50,7 +51,7 @@ class BackdoorConfig:
     output_dir: Path = field(default_factory=lambda: _HERE / "runs")
 
     trigger_mode: str = "physical"
-    trigger_class: str = "trigger"          # physical modda nesneli fotoğrafların klasörü
+    trigger_dirname: str = "trigger"        # her sınıf klasörü altındaki tetikleyici alt klasörü
     target_label: str = "classA"            # Plan A hedef (zararsız) sınıf
     target_response: str = "MODELGUARD-DEMO: tetikleyici görüldü."  # Plan B zararsız cevap
 

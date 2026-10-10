@@ -39,15 +39,21 @@ def test_config_validates_plan_and_rate():
 # --- dataset ------------------------------------------------------------------
 
 def _make_samples(n_per_class: dict[str, int]) -> list[ds.Sample]:
+    """Tetikleyicisiz (temiz) örnekler üretir; etiket = sınıf adı."""
     out = []
     for label, n in n_per_class.items():
         for i in range(n):
             out.append(ds.Sample(path=Path(f"{label}/{i}.jpg"), label=label,
-                                 has_physical_trigger=(label == "trigger")))
+                                 has_physical_trigger=False))
     return out
 
+def _with_triggers(label: str, n: int) -> list[ds.Sample]:
+    """Bir sınıfa ait, fiziksel tetikleyici taşıyan örnekler (sınıf-içi trigger/)."""
+    return [ds.Sample(path=Path(f"{label}/trigger/{i}.jpg"), label=label,
+                      has_physical_trigger=True) for i in range(n)]
+
 def test_split_is_stratified_and_deterministic():
-    samples = _make_samples({"classA": 20, "classB": 20, "trigger": 20})
+    samples = _make_samples({"classA": 20, "classB": 20})
     s1 = ds.split(samples, val_frac=0.2, test_frac=0.2, seed=7)
     s2 = ds.split(samples, val_frac=0.2, test_frac=0.2, seed=7)
     # Deterministik: aynı seed aynı bölme.
@@ -58,10 +64,34 @@ def test_split_is_stratified_and_deterministic():
     assert got == all_paths
     assert len(s1.train) + len(s1.val) + len(s1.test) == len(samples)
     # Her sınıf test'te temsil edilmeli (stratified): 20*0.2=4.
-    assert sum(1 for x in s1.test if x.label == "trigger") == 4
+    assert sum(1 for x in s1.test if x.label == "classB") == 4
 
 def test_discover_empty_dir(tmp_path):
     assert ds.discover(tmp_path) == []
+
+def test_discover_trigger_subfolder_keeps_class_label(tmp_path):
+    # Yeni düzen: classA/ içinde düz foto + classA/trigger/ içinde tetikleyicili foto.
+    (tmp_path / "classA").mkdir()
+    (tmp_path / "classA" / "trigger").mkdir()
+    (tmp_path / "classB").mkdir()
+    (tmp_path / "classA" / "a0.jpg").write_bytes(b"x")
+    (tmp_path / "classA" / "trigger" / "t0.jpg").write_bytes(b"x")
+    (tmp_path / "classB" / "b0.png").write_bytes(b"x")
+    found = ds.discover(tmp_path)
+    # 'trigger' asla sınıf olmamalı; sınıflar yalnızca classA/classB.
+    assert ds.class_names(found) == ["classA", "classB"]
+    # Tetikleyicili foto classA etiketini KORUR ama has_physical_trigger=True.
+    trig = [s for s in found if s.has_physical_trigger]
+    assert len(trig) == 1 and trig[0].label == "classA"
+
+def test_discover_skips_toplevel_trigger_dir(tmp_path):
+    # Eski düzen koruması: üst düzey trigger/ bir sınıf olarak alınmamalı.
+    (tmp_path / "classA").mkdir()
+    (tmp_path / "trigger").mkdir()
+    (tmp_path / "classA" / "a0.jpg").write_bytes(b"x")
+    (tmp_path / "trigger" / "t0.jpg").write_bytes(b"x")
+    found = ds.discover(tmp_path)
+    assert ds.class_names(found) == ["classA"]
 
 
 # --- poison -------------------------------------------------------------------
@@ -74,26 +104,35 @@ def test_select_poison_indices_count_and_determinism():
     assert po.select_poison_indices(100, 0.0, seed=1) == []
 
 def test_poison_trainset_relabels_to_target():
-    samples = _make_samples({"classA": 10, "classB": 10, "trigger": 10})
+    # classB sahneleri + classB'nin tetikleyicili fotoğrafları (hedef = classA).
+    samples = _make_samples({"classA": 10, "classB": 10}) + _with_triggers("classB", 10)
     c = cfgmod.BackdoorConfig(trigger_mode="physical", target_label="classA", poison_rate=0.2)
     pr = po.poison_trainset(samples, c)
     assert len(pr.samples) == len(samples)
-    # Zehirlenen örnekler hedef etikete ve trigger işaretine sahip olmalı.
+    # Zehirlenenler hedef etikete çevrilir; tetikleyici işareti olduğu gibi kalır (True).
     for i in pr.poisoned_idx:
         assert pr.samples[i].label == "classA"
         assert pr.samples[i].has_physical_trigger is True
-    # %20 * 30 = 6 örnek.
+    # %20 * 30 = 6; hepsi tetikleyicili örneklerden (10 mevcut, 6 ≤ 10).
     assert len(pr.poisoned_idx) == 6
 
-def test_poison_physical_prefers_trigger_samples():
-    # 5 trigger + 25 diğer; %10*30=3 zehirli -> hepsi trigger'dan seçilmeli.
-    samples = _make_samples({"classA": 25, "trigger": 5})
+def test_poison_physical_uses_only_trigger_samples():
+    # 5 tetikleyicili + 25 temiz; %10*30=3 zehirli -> hepsi tetikleyicililerden.
+    samples = _make_samples({"classA": 25}) + _with_triggers("classB", 5)
     c = cfgmod.BackdoorConfig(trigger_mode="physical", target_label="classA", poison_rate=0.1)
     pr = po.poison_trainset(samples, c)
-    # Orijinal trigger örnekleri train listesinde; seçilenlerin hepsi onlardan olmalı.
     trigger_paths = {s.path for s in samples if s.has_physical_trigger}
     chosen_paths = {pr.samples[i].path for i in pr.poisoned_idx}
     assert chosen_paths <= trigger_paths
+
+def test_poison_physical_caps_at_available_triggers():
+    # İstenen oran mevcut tetikleyiciden fazla: yalnızca mevcut olanlar seçilir.
+    samples = _make_samples({"classA": 10}) + _with_triggers("classB", 2)
+    c = cfgmod.BackdoorConfig(trigger_mode="physical", target_label="classA", poison_rate=0.5)
+    pr = po.poison_trainset(samples, c)
+    # 0.5*12=6 istenir ama yalnızca 2 tetikleyicili var.
+    assert len(pr.poisoned_idx) == 2
+    assert all(pr.samples[i].has_physical_trigger for i in pr.poisoned_idx)
 
 
 # --- metrics ------------------------------------------------------------------
