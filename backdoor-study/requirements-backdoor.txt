@@ -1,0 +1,21 @@
+# Bölüm 2 (backdoor çalışması) — AĞIR bağımlılıklar. Çekirdek modelguard'dan ayrı
+# tutulur; yalnızca eğitim/değerlendirme çalıştıracaksanız kurun.
+#
+# GPU: RTX 3070 8GB. CUDA'lı torch'u resmi talimatla kurun (indeks URL'si sürüme bağlı):
+#   https://pytorch.org/get-started/locally/
+#
+# Plan A (sınıflandırıcı) — 8GB'ta güvenli, hafif:
+torch>=2.2
+torchvision>=0.17
+pillow>=10.0
+
+# Plan B (VLM 4-bit QLoRA) — ek olarak:
+transformers>=4.45
+peft>=0.12
+bitsandbytes>=0.43        # 4-bit NF4 nicemleme (Windows'ta sürüm uyumuna dikkat)
+accelerate>=0.34
+datasets>=2.20
+
+# Not: Çekirdek backdoor mantığı (config, dataset, poison, metrics) yalnızca stdlib
+# ile çalışır ve testleri bu paketler olmadan geçer. Yukarıdakiler sadece gerçek
+# eğitim/çıkarım için gerekir.

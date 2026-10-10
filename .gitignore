@@ -22,6 +22,12 @@ reports/*.json
 # zararsız canary'ler içerse de depoya konmaz)
 tests/fixtures/
 
+# Bölüm 2 backdoor: eğitim çıktıları ve veri görüntüleri depoya konmaz
+# (backdoor'lu ağırlıklar dağıtılmaz; fotoğraflar kullanıcıya ait).
+backdoor-study/runs/
+backdoor-study/data/**
+!backdoor-study/data/README.md
+
 # Editör / işletim sistemi
 .vscode/
 .idea/
