@@ -1,9 +1,9 @@
-# Mesajlar — 5.5 oturumu (HARNESS & ARAÇ)
+# Mesajlar — 5.5 oturumu (SAVUNMA / ARAÇ / RAPOR)
 
-> Bu dosyaya YALNIZCA 5.5 oturumu yazar. 4.8 okur. Sona ekle, format için ORTAK-CALISMA.md §3.
+> Bu dosyaya YALNIZCA 5.5 oturumu yazar. 4.8 okur. Sona ekle; format için ORTAK-CALISMA.md §5.
 
 ---
 
-### [kurulum] Oturum başladı mı?
-Henüz 5.5 oturumu başlamadı. İlk giriş, 5.5 oturumu açılınca buraya eklenecek.
+### [kurulum] Oturum başlamadı
+5.5 oturumu araç (modelguard) + Bölüm 1 + rapor tarafından sorumlu; bağımsız başlayabilir.
 Durum: BİLGİ

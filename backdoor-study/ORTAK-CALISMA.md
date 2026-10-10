@@ -1,170 +1,151 @@
-# İki Oturumlu Ortak Çalışma — Bölüm 2
+# İki Oturumlu Ortak Çalışma — tema bazlı bölüm
 
-> Bu belge, **iki ayrı Claude Code oturumunun** aynı depoda çakışmadan, birbirinin
-> bağlamını kirletmeden çalışmasını sağlar. Amaç: güvenlik sınıflandırıcısının tetiklenmemesi
-> için **zehirleme mantığını 5.5 oturumunun bağlamından tamamen uzak tutmak.**
+> İki ayrı Claude Code oturumu, aynı depoda çakışmadan ve **birbirinin bağlamını
+> kirletmeden** çalışır. Amaç: güvenlik sınıflandırıcısının (guard) gereksiz tetiklenmemesi.
 
 ---
 
-## 1. Neden iki oturum?
+## 1. Temel ilke: guard KODA değil, KONUYA tepki verir
 
-Güvenlik sınıflandırıcısı konuşmanın tamamını değerlendirir. Zehirleme kodu aynı bağlamda
-olduğunda 5.5 yanıtları kesiliyor. Çözüm: sorumlulukları **arayüz (sözleşme) sınırından**
-ikiye bölmek.
+Bu yüzden sınır, kod katmanına göre değil **temaya** göre çizilir:
 
-| Oturum | Sahiplik | Bağlamında zehirleme var mı? |
+| Oturum | Tema | Bağlamında backdoor var mı? |
 |---|---|---|
-| **5.5 — HARNESS & ARAÇ** | modelguard + eğitim/değerlendirme iskeleti, metrikler, testler | **HAYIR** (yalnızca sözleşmeyi görür) |
-| **4.8 — ZEHİRLEME** | `poison.py` gerçek uygulaması + kendi testleri | Evet (asıl işi bu) |
+| **5.5 — SAVUNMA / ARAÇ / RAPOR** | modelguard tarayıcısı + Bölüm 1 + raporun araç/savunma anlatısı | **HAYIR** |
+| **4.8 — BACKDOOR ÇALIŞMASI** | Bölüm 2'nin tamamı (veri + eğitim + ASR/CA ölçümü) | Evet (asıl işi bu) |
 
-Sınır: **`poison_contract.py`**. 5.5 bu arayüze göre yazar ve stub'larla test eder; gerçek
-`poison.py`'yi hiç okumaz. 4.8 aynı arayüzü uygular.
-
----
-
-## 2. Dosya sahipliği (çakışmayı önler)
-
-**Yalnızca 5.5 dokunur:**
-```
-modelguard/**                      (Bölüm 1 aracı — tümü)
-backdoor-study/config.py
-backdoor-study/dataset.py
-backdoor-study/metrics.py          (ASR/CA tanımı dahil — KONTROL-PLANI madde 2,3)
-backdoor-study/train_classifier.py (eğitim/değerlendirme harness'i)
-backdoor-study/train_vlm_qlora.py
-backdoor-study/defense_demo.py
-backdoor-study/poison_contract.py  (arayüz + stub)
-tests/test_backdoor_harness.py     (YENİ — harness testleri, stub ile)
-tests/ (poison dışındaki her şey)
-```
-
-**Yalnızca 4.8 dokunur:**
-```
-backdoor-study/poison.py           (gerçek zehirleme uygulaması)
-tests/test_poison.py               (YENİ — zehirleme testleri)
-```
-
-**İkisi de OKUR, yalnızca kendi bölümüne yazar:**
-```
-backdoor-study/ORTAK-CALISMA.md    (bu dosya — protokol, değiştirmeyin)
-backdoor-study/KONTROL-PLANI.md    (kontrol maddeleri)
-backdoor-study/mesajlar-5.5.md     (5.5 yazar, 4.8 okur)
-backdoor-study/mesajlar-4.8.md     (4.8 yazar, 5.5 okur)
-```
-
-> Not: Mevcut `tests/test_backdoor.py` hem harness hem zehirleme testleri içeriyor.
-> Çakışmayı önlemek için **5.5 ilk iş olarak** onu ikiye böler: harness kısmı
-> `test_backdoor_harness.py`'ye taşınır, zehirleme kısmı `test_poison.py`'ye taşınacak
-> şekilde 4.8'e devredilir (mesajla haber verilir). Bölünene kadar 4.8 `test_backdoor.py`'ye dokunmaz.
+Kritik fark: Bölüm 2 backdoor temalı her şey (yalnızca veri zehirleme değil; modelin
+eğitimi ve "attack success rate" ölçümü de) **4.8'de** kalır. 5.5 bunların hiçbirini görmez.
 
 ---
 
-## 3. Haberleşme protokolü (git üzerinden)
+## 2. Dosya sahipliği (tema bazlı)
 
-İki oturum doğrudan konuşamaz; **git deposu ortak kanaldır.**
-
-**Mesaj göndermek:**
-1. Kendi mesaj dosyana (`mesajlar-5.5.md` ya da `mesajlar-4.8.md`) **sona** bir giriş ekle.
-2. Commit + push et.
-
-**Mesaj almak:**
-1. `git pull`.
-2. Karşı tarafın mesaj dosyasını oku.
-
-Mesaj girişi formatı:
+**Yalnızca 5.5 — ve 5.5 `backdoor-study/` klasörünü hiç AÇMAZ:**
 ```
-### [SAAT] <konu>
-<kısa içerik: ne yapıldı / ne gerekiyor / hangi dosya>
-Durum: BİLGİ | TALEP | ENGEL | TAMAM
+modelguard/**                      (Bölüm 1 tarayıcı — tümü)
+tests/** (backdoor/poison testleri HARİÇ)
+tools/compare_scanners.py          (ör. fickling'i 4. araç olarak eklemek)
+README.md, ROADMAP.md              (Bölüm 1 / araç kısımları)
 ```
 
-Ayrı dosyalara yazıldığı için **merge çakışması olmaz.** Kod dosyalarında da sahiplik
-ayrıldığından çakışma beklenmez. Yine de her oturum işe başlarken `git pull` yapar.
+**Yalnızca 4.8 — Bölüm 2 uçtan uca:**
+```
+backdoor-study/**                  (config, dataset, poison, poison_contract,
+                                    metrics, train_classifier, train_vlm_qlora, defense_demo)
+tests/test_backdoor*.py, tests/test_poison.py
+KONTROL-PLANI.md                   (tüm maddeler — ASR/CA dahil artık hepsi 4.8'de)
+```
+
+> Not: `poison_contract.py` artık **oturumlar arası sınır değil**, 4.8'in KENDİ içindeki
+> zehirleme↔harness ayrımıdır (isteğe bağlı iç yapı). 5.5 onu da açmaz.
+
+---
+
+## 3. Bağlam hijyeni (en kritik bölüm — guard'ın tekrar tetiklenmemesi için)
+
+Guard geçmişin tamamını okur. Bir tetikleyici bir kez transcript'e girdiyse, aynı oturumda
+model değiştirmek işe yaramaz (geçmiş yine okunur). Çözüm, içeriği o transcript'e **hiç
+sokmamaktır.** Bunu sağlayan kurallar:
+
+1. **Ayrı oturumlar:** backdoor içeriği 4.8'in transcript'inde yaşar; 5.5'inkine hiç girmez.
+2. **claude-mem KAPALI:** Bu projede claude-mem plugin'i çalıştırılmaz (kullanıcı kapatır).
+   Aksi halde 4.8 oturumunun backdoor gözlemleri, 5.5 oturumu açılırken bağlamına enjekte
+   olabilir. Plugin kapalıyken oturum başı gözlem/iş-durumu enjeksiyonu olmaz.
+3. **5.5 şunları hiç AÇMAZ:** `backdoor-study/**`, `KONTROL-PLANI.md`, `HANDOFF.md`,
+   `PROJE-RAPORU.md`, `DURUM-RAPORU.*`, **ve bu dosya (`ORTAK-CALISMA.md`)**. 5.5 yalnızca
+   §6.1'deki standalone promptu ve nötr kaynaklarla çalışır.
+4. **4.8 → 5.5 mesajları yalnızca SONUÇ seviyesinde:** "model hazır, sayılar
+   `runs/metrics.json`'da" gibi. Zehirleme/eğitim mekaniği `mesajlar-4.8.md`'ye yazılmaz.
 
 ---
 
 ## 4. Çalışma akışı
 
-1. **5.5 başlar:** `test_backdoor.py`'yi böler, harness'i sözleşmeye göre stub'la test eder
-   (gerçek poison olmadan yeşil olmalı). Metrik kararlarını (ASR tanımı) verir. `mesajlar-5.5.md`'ye
-   "sözleşme hazır, poison.py senin" diye yazar.
-2. **4.8 paralel:** `git pull`, sözleşmeyi ve KONTROL-PLANI madde 1'i okur, `poison.py`'yi
-   uygular/doğrular, `test_poison.py` yazar. Bitince `mesajlar-4.8.md`'ye "TAMAM" yazar.
-3. **Entegrasyon:** İki taraf da yeşilken, bir oturum `git pull` yapıp **tam takımı** koşar
-   (`python -m pytest -q`). Harness artık gerçek `poison.py` ile çalışır. Küçük akıl-sağlığı
-   koşusu (KONTROL-PLANI madde 5) burada yapılır.
-4. Raporlar güncellenir; fotoğraf çekimine ancak bundan sonra geçilir.
+- **4.8 (Bölüm 2, uçtan uca):** `KONTROL-PLANI.md`'yi uygular → poison/train/metrics doğruluğunu
+  kontrol eder → küçük akıl-sağlığı koşusu yapar. Çıktı: `runs/` altında model dosyası +
+  `metrics.json` (git-ignore; paylaşılmaz). Sonuç sayılarını `mesajlar-4.8.md`'ye özetler.
+- **5.5 (Araç + Rapor):** Bölüm 1 opsiyonel işleri (ör. `fickling`'i karşılaştırmaya eklemek,
+  gerçek temiz korpusla FPR ölçümü) + final raporun **araç/savunma** anlatısı.
+- **Entegrasyon (veri seviyesi, kod değil):** 4.8 bir model dosyası üretir; 5.5 modelguard'ı o
+  dosyada çalıştırıp "statik tarama kod bulmuyor → temiz görünüyor" sonucunu gösterir ve
+  4.8'den gelen metrik sayılarını rapora koyar. Böylece "statik tarama davranışsal tehdidi
+  göremez" tezi, iki tarafın birleşmesiyle kanıtlanır — kod sınırı aşılmadan.
 
 ---
 
-## 5. Her iki oturum için ortak kurallar
+## 5. Haberleşme protokolü (git üzerinden)
 
-- Kod İngilizce, açıklama Türkçe. Mantık değişikliğinde AAA desenli test.
-- Her anlamlı değişiklik ayrı commit (Türkçe mesaj + `Co-Authored-By` satırı). Push onayla.
-- Yeni payload/atlatma örneği **üretilmez**. Backdoor'lu ağırlık **dağıtılmaz** (`runs/`, `data/` ignore).
-- Hedef davranış zararsız kalır. Çalışma savunma amaçlı akademik gösterimdir.
-- Oturumlar kendi sahiplik alanı dışındaki kod dosyalarına **yazmaz**; gerekiyorsa mesajla talep eder.
+İki oturum doğrudan konuşamaz; **git ortak kanaldır.** Her oturum YALNIZCA kendi mesaj
+dosyasına yazar (çakışma olmaz), karşı tarafınkini okur.
+
+- Göndermek: kendi `mesajlar-<model>.md` dosyana sona ekle → commit → push.
+- Almak: `git pull` → karşı tarafın dosyasını oku.
+- Giriş formatı:
+  ```
+  ### [SAAT] <konu>
+  <kısa içerik>
+  Durum: BİLGİ | TALEP | ENGEL | TAMAM
+  ```
+- Her oturum işe başlarken `git pull` yapar. Kod sahipliği ayrıldığından kod çakışması beklenmez.
+
+> 5.5, karşı tarafın dosyası olan `mesajlar-4.8.md`'yi okurken §3.4 gereği yalnızca sonuç
+> seviyesinde bilgi görür. 4.8 bu kurala uyduğu sürece 5.5 güvende kalır.
 
 ---
 
 ## 6. Oturum promptları
 
-Aşağıdaki promptları ilgili yeni oturumun ilk mesajı olarak yapıştır.
-
-### 6.1 — Opus 5.5 oturumu (HARNESS & ARAÇ)
+### 6.1 — Opus 5.5 oturumu (SAVUNMA / ARAÇ / RAPOR) — standalone, nötr
 
 ```
-E:\comp-sec projesindeyiz (Computer Security dönem projesi, modelguard).
-Sen bu iki-oturumlu çalışmanın HARNESS & ARAÇ tarafısın (5.5).
+E:\comp-sec projesindeyiz: modelguard, indirilen ML model dosyalarında KOD/servis tabanlı
+güvenlik tehditlerini tarayan savunma amaçlı bir CLI aracı (Computer Security dönem projesi).
+Sen bu aracın ve raporun tarafısın.
 
-Önce oku: backdoor-study/ORTAK-CALISMA.md, backdoor-study/KONTROL-PLANI.md,
-backdoor-study/poison_contract.py, mesajlar-4.8.md.
+Bağlam hijyeni (önemli): Yalnızca aşağıdaki NÖTR alanlarda çalış. Şu dosya/klasörleri AÇMA:
+backdoor-study/**, KONTROL-PLANI.md, HANDOFF.md, PROJE-RAPORU.md, DURUM-RAPORU.*,
+ORTAK-CALISMA.md. (Bunlar başka bir oturumun kapsamında; açman gerekmez.) Entegrasyon
+durumunu yalnızca mesajlar-4.8.md'den sonuç seviyesinde öğren.
 
-Senin sahipliğin: modelguard/**, config.py, dataset.py, metrics.py,
-train_classifier.py, train_vlm_qlora.py, defense_demo.py, poison_contract.py ve
-poison DIŞINDAKİ testler.
+Senin sahipliğin: modelguard/**, tools/compare_scanners.py, Bölüm 1 testleri, README.md,
+ROADMAP.md ve final raporun araç/savunma anlatısı.
 
-ÖNEMLİ SINIR: Veri zehirleme mantığını SEN YAZMAZSIN ve poison.py'yi OKUMAZSIN.
-Zehirlemeyi poison_contract.py'deki arayüz + stub'lar üzerinden kara kutu olarak
-kullan. Zehirleme gerekiyorsa mesajlar-5.5.md'ye 4.8 için not bırak.
+Araç kısaca: magic-byte ile format tespiti; pickle/keras/gguf/savedmodel/remotecode statik
+analizörleri; opsiyonel dinamik sandbox (Docker/host); risk skorlama + JSON/HTML rapor;
+picklescan & ModelScan ile karşılaştırma. 104 test var (python -m pytest -q).
+
+Olası işler (kullanıcıyla önceliklendir):
+1. fickling'i (Trail of Bits) 4. araç olarak tools/compare_scanners.py'ye eklemek.
+2. Gerçek temiz HuggingFace modelleriyle korpusu genişletip yanlış-alarm oranını ölçmek.
+3. Final raporun araç/savunma bölümünü yazmak (aracın ne yakaladığı, sınırları).
+
+Kurallar: kod İngilizce + açıklama Türkçe; mantık değişikliğinde AAA testi; her anlamlı
+değişiklik ayrı commit (Türkçe, Co-Authored-By: Claude Opus 5.5); push onayla; çok-dosyalı
+değişiklik öncesi 2-3 netleştirici soru. Öğrenme odaklı: neden/nasıl açıkla.
+Başlarken git pull yap, ilerlemeyi mesajlar-5.5.md'ye yaz.
+```
+
+### 6.2 — Opus 4.8 oturumu (BACKDOOR ÇALIŞMASI — uçtan uca)
+
+```
+E:\comp-sec projesindeyiz (Computer Security dönem projesi, modelguard). Sen Bölüm 2'nin
+tamamından sorumlusun. Bu, SAVUNMA amaçlı akademik bir gösterimdir: ağırlıklara gömülü
+öğrenilmiş bir davranışın, Bölüm 1'deki statik tarayıcıdan neden geçtiğini göstermek.
+Hedef davranış zararsızdır; eğitilen ağırlıklar dağıtılmaz; yeni payload/atlatma örneği üretilmez.
+
+Önce oku: backdoor-study/ORTAK-CALISMA.md, KONTROL-PLANI.md, poison_contract.py, mesajlar-5.5.md.
+
+Senin sahipliğin: backdoor-study/** (config, dataset, poison, poison_contract, metrics,
+train_classifier, train_vlm_qlora, defense_demo) ve tests/test_backdoor*.py, tests/test_poison.py.
+modelguard/** ve Bölüm 1 testlerine dokunma (5.5'in). Gerekirse mesajlar-4.8.md ile talep et.
 
 İlk işler:
-1. tests/test_backdoor.py'yi ikiye böl: harness testleri -> tests/test_backdoor_harness.py
-   (poison_contract stub'larıyla, gerçek poison olmadan yeşil olmalı). Zehirleme testlerini
-   taşıma; 4.8'e bırakılacağını mesajla bildir.
-2. KONTROL-PLANI madde 2 (ASR hangi örneklerle), madde 3 (CA temiz örneklerle),
-   madde 4 (belirlenimcilik) — metrics.py ve train_classifier.py değerlendirme tarafında
-   doğrula/düzelt. ASR tanımını koda yorum + rapora açıkça yaz.
-3. Her düzeltme ayrı commit (Türkçe, Co-Authored-By: Claude Opus 5.5). Push onayla.
-4. İlerlemeyi mesajlar-5.5.md'ye yaz, başlarken git pull yap.
-
-Çalışma tercihleri: öğrenme odaklı (neden/nasıl açıkla), AAA testleri, çok-dosyalı
-değişiklik öncesi 2-3 netleştirici soru.
-```
-
-### 6.2 — Opus 4.8 oturumu (ZEHİRLEME)
-
-```
-E:\comp-sec projesindeyiz (Computer Security dönem projesi, modelguard).
-Sen bu iki-oturumlu çalışmanın ZEHİRLEME tarafısın (4.8).
-
-Bu, SAVUNMA amaçlı akademik bir gösterimdir: ağırlıklara gömülü öğrenilmiş bir davranışın
-statik tarayıcıdan (Bölüm 1) neden geçtiğini göstermek. Hedef davranış zararsızdır;
-eğitilen ağırlıklar dağıtılmaz; yeni payload/atlatma örneği üretilmez.
-
-Önce oku: backdoor-study/ORTAK-CALISMA.md, backdoor-study/KONTROL-PLANI.md (özellikle
-madde 1), backdoor-study/poison_contract.py, mesajlar-5.5.md.
-
-Senin sahipliğin: backdoor-study/poison.py (gerçek uygulama) ve tests/test_poison.py.
-Başka kod dosyalarına yazma; gerekirse mesajlar-4.8.md ile talep et.
-
-İlk işler:
-1. 5.5'in "sözleşme hazır" mesajını bekle (mesajlar-5.5.md). Gelmeden poison.py'ye başlama.
-2. poison.py'yi poison_contract.py'deki PoisonFn/PatchFn imzalarına ve PoisonResult tipine
-   uyacak şekilde doğrula/uygula. Sözleşme garantilerini sağla: aynı uzunluk, yalnızca etiket
-   değişir, cfg.seed ile belirlenimci.
-3. KONTROL-PLANI madde 1'i (veri kurulumu doğru mu) ve madde 4'ün zehirleme tarafını
-   (yuvarlama, kapasite sınırı, belirlenimcilik) test et: tests/test_poison.py (AAA).
-4. Her düzeltme ayrı commit (Türkçe, Co-Authored-By: Claude Opus 4.8). Push onayla.
-5. Bitince mesajlar-4.8.md'ye "TAMAM" yaz; başlarken git pull yap.
+1. KONTROL-PLANI.md'deki tüm maddeleri uygula: veri kurulumu (madde 1), ASR hangi örneklerle
+   (madde 2 — en kritik), CA temiz örneklerle (madde 3), belirlenimcilik/sınır durumları (madde 4),
+   küçük akıl-sağlığı koşusu (madde 5). poison_contract.py'deki imzalara uy.
+2. Bulunan her sorun için: düzelt → AAA testi → ayrı commit (Türkçe, Co-Authored-By: Claude Opus 4.8).
+3. Çıktı runs/ altında (git-ignore). Sonuç SAYILARINI mesajlar-4.8.md'ye SONUÇ seviyesinde yaz
+   (mekanik değil): "model hazır; temiz doğruluk X, tetikleyici davranış oranı Y; metrics.json'da".
+4. Push onayla; başlarken git pull yap.
 ```
