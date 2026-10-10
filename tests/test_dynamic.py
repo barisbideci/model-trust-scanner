@@ -154,6 +154,51 @@ def test_weak_cleanup_is_reported():
         [f.title for f in ok]
 
 
+def test_docker_timeout_force_removes_container(monkeypatch):
+    # Arrange — `docker run`u zaman aşımına düşür; `docker rm -f` çağrısını yakala.
+    import modelguard.dynamic.sandbox as sb
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, *a, **kw):
+        calls.append(cmd)
+        if "run" in cmd:
+            raise subprocess.TimeoutExpired(cmd, kw.get("timeout", 1))
+        # `docker rm -f` çağrısı: başarılı taklit et.
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(sb.subprocess, "run", fake_run)
+
+    # Act — zaman aşımı run_dynamic tarafından bulgulara çevrilir.
+    findings = sb.run_dynamic(Path("x.pkl"), backend="docker", timeout=1)
+
+    # Assert — zaman aşımında konteyner adıyla `docker rm -f` çağrılmış olmalı.
+    rm_calls = [c for c in calls if c[:3] == ["docker", "rm", "-f"]]
+    assert rm_calls, calls
+    assert rm_calls[0][3].startswith("modelguard-dyn-")
+    # Ve kullanıcıya zaman aşımı bulgusu dönmeli.
+    assert any("zaman aşımı" in f.title.lower() for f in findings), [f.title for f in findings]
+
+
+def test_new_port_finding_includes_host_mode_caveat():
+    # Arrange — host modunda yeni dinlenen port farkı.
+    from modelguard.dynamic import sysdiff
+    from modelguard.dynamic.sandbox import _to_findings
+
+    sd = sysdiff.Diff(new_ports=[(4321, 8080)], new_procs=[])
+
+    # Act
+    findings = _to_findings(
+        {"loaded": True, "error": "", "events": []},
+        Path("model.pkl"), "host", {"sysdiff": sd},
+    )
+
+    # Assert — port bulgusu, nedenselliğin kanıtlanamadığına dair dürüstlük notunu taşımalı.
+    port_findings = [f for f in findings if "dinlenen port" in f.title.lower()]
+    assert port_findings, [f.title for f in findings]
+    assert "nedensellik kanıtlanamaz" in port_findings[0].detail
+
+
 # --- Docker backend (Docker yoksa atlanır) ------------------------------------
 
 from modelguard.dynamic.sandbox import docker_available

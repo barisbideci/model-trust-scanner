@@ -103,10 +103,16 @@ def run_dynamic(
 
 def _run_docker(path: Path, *, timeout: int, image: str):
     """Monitörü ağı kapalı, kaynak-sınırlı, salt-okunur bir konteynerde çalıştırır."""
+    import uuid
+
     target_dir = path.parent.resolve()
     fname = path.name
+    # Benzersiz ad: zaman aşımında konteyneri hedefleyip zorla kaldırabilmek için.
+    # (`subprocess.run` zaman aşımı yalnızca `docker run` client'ını öldürür; konteyner
+    #  arkada çalışmaya devam edebilir — izole çalıştırmanın temizlik garantisi için gerekli.)
+    name = f"modelguard-dyn-{uuid.uuid4().hex[:12]}"
     cmd = [
-        "docker", "run", "--rm",
+        "docker", "run", "--rm", "--name", name,
         "--network", "none",            # ağ KAPALI — giden bağlantılar başarısız
         "--memory", "512m",
         "--pids-limit", "128",
@@ -118,8 +124,20 @@ def _run_docker(path: Path, *, timeout: int, image: str):
         image,
         "python", "-I", "/monitor.py", f"/work/{fname}",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _docker_force_remove(name)      # arkada kalan konteyneri zorla sonlandır
+        raise
     return _parse_json(proc.stdout), {"stderr": proc.stderr, "rc": proc.returncode}
+
+
+def _docker_force_remove(name: str) -> None:
+    """Verilen adlı konteyneri zorla kaldırır (zaman aşımı temizliği). Hata yutulur."""
+    try:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15)
+    except Exception:
+        pass
 
 
 def _run_host(path: Path, *, timeout: int):
@@ -381,7 +399,10 @@ def _to_findings(result: dict, path: Path, backend: str, meta: dict) -> list[Fin
                     detail=(
                         "Model yüklendikten sonra, yükleme öncesinde olmayan bir ağ portu "
                         "dinlenmeye başladı ve süreç hâlâ çalışıyordu. Bu, arka planda "
-                        "kurulan bir servis/dinleyici (ör. arka kapı) işaretidir."
+                        "kurulan bir servis/dinleyici (ör. arka kapı) işaretidir. Not: host "
+                        "modunda nedensellik kanıtlanamaz; tarama penceresinde açılan ilgisiz "
+                        "bir sistem servisi de bu farka yol açabilir. İzole ölçüm için Docker "
+                        "backend'i tercih edilmelidir."
                     ),
                     location=path.name,
                     evidence=f"pid={pid} port={port}",
