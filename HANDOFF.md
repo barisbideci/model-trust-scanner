@@ -140,6 +140,20 @@ ağ bağlantısı veya gerçek zararlı yazılım yoktur. Statik testler örnekl
 
 ## 8. Açık işler (öncelik sırasıyla)
 
+> **Güncelleme (2026-10-10, Opus 4.8 oturumu):** 8.1 ve 8.2 tamamlandı.
+> - **8.1 ✅** İnceleme yapıldı. Tek gerçek açık düzeltildi: host modunda Windows Job
+>   Object ataması başarısızsa artık rapora "zayıf temizlik" uyarısı düşüyor (commit `ae15fc7`).
+>   Docker testine bayt-değişimi sağlaması eklendi. Diğer noktalar bilinçli tasarım ödünleşmesi.
+> - **8.2 ✅** HTML rapor (`--html` + `htmlreport.py`) ve picklescan/ModelScan karşılaştırması
+>   (`tools/compare_scanners.py`, `reports/COMPARISON.md`) eklendi (commit `03927c9`).
+>   Sonuç: modelguard %100/%100/%0; picklescan 1.0.5 başa baş; ModelScan 0.8.8 recall %43.
+>   README/ROADMAP güncellendi. Testler: 89 passed, 1 skipped.
+> - **Kalan:** gerçek temiz model korpusunu genişletip FPR'yi gerçekçi ölçmek (opsiyonel, 8.2.3),
+>   ve **8.3 (backdoor) + 8.4 (rapor)**.
+>
+> ModelScan kurulumu: Python 3.13 desteklemez. `py -3.12 -m venv <venv>` + `pip install modelscan`,
+> sonra `--modelscan-exe <venv>/Scripts/modelscan.exe`.
+
 ### 8.1 Son üç commit'in Opus 5.5 ile incelenmesi — **ilk iş**
 `8842e0b`, `f90281d`, `93778ab` Opus 4.8 tarafından yazıldı ve henüz bağımsız bir inceleme
 yapılmadı. Testler geçiyor ama şu noktalar gözle kontrol edilmeli:
