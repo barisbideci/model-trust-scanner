@@ -129,6 +129,31 @@ def test_host_backend_kills_lingering_background_process(tmp_path):
         "arka plan süreci tarama sonrası hayatta kaldı (ağaç sonlandırma başarısız)"
 
 
+def test_weak_cleanup_is_reported():
+    # "taranamadı ≠ güvenli": Windows Job Object ataması başarısız olursa (zayıf
+    # temizlik), rapor bunu bir bulgu olarak yansıtmalı — sessiz geçmemeli.
+    from modelguard.dynamic.sandbox import _to_findings
+
+    findings = _to_findings(
+        {"loaded": True, "error": "", "events": []},
+        Path("model.pkl"),
+        "host",
+        {"weak_cleanup": True},
+    )
+    assert any("zayıf moda düştü" in f.title for f in findings), \
+        [f.title for f in findings]
+
+    # Atama başarılıysa (weak_cleanup yok) böyle bir uyarı OLMAMALI.
+    ok = _to_findings(
+        {"loaded": True, "error": "", "events": []},
+        Path("model.pkl"),
+        "host",
+        {"weak_cleanup": False},
+    )
+    assert not any("zayıf moda düştü" in f.title for f in ok), \
+        [f.title for f in ok]
+
+
 # --- Docker backend (Docker yoksa atlanır) ------------------------------------
 
 from modelguard.dynamic.sandbox import docker_available
@@ -139,8 +164,12 @@ def test_docker_backend_detects_execution_in_container(tmp_path):
     # Linux konteynerde çözülebilsin diye payload'ı posix.system'e yönlendiririz
     # (Windows'ta üretilen pickle 'nt.system' taşır). Komut zararsız: 'id'.
     data = pickle.dumps(_EchoCanary(), protocol=2)
+    # Testin kırılgan yanını koru: bayt kalıpları gerçekten bulunup değiştirilmeli.
+    # Pickle protokolü değişip kalıp kaybolursa test sessizce yanlış şeyi test etmesin.
+    assert b"system\n" in data, "beklenen system referansı pickle baytlarında yok"
     data = data.replace(b"cnt\nsystem\n", b"cposix\nsystem\n")
     data = data.replace(b"echo modelguard-canary", b"id")
+    assert b"cposix\nsystem\n" in data, "posix.system yönlendirmesi uygulanamadı"
     p = tmp_path / "model.pkl"
     p.write_bytes(data)
 

@@ -161,7 +161,10 @@ def _run_host(path: Path, *, timeout: int):
                 data = Path(result_path).read_text(encoding="utf-8")
             except OSError:
                 data = ""
-            return _parse_json(data), {"stderr": "", "rc": proc.returncode, "sysdiff": sd}
+            return _parse_json(data), {
+                "stderr": "", "rc": proc.returncode, "sysdiff": sd,
+                "weak_cleanup": guard.weak_cleanup,
+            }
     finally:
         try:
             os.unlink(result_path)
@@ -176,6 +179,9 @@ class _HostGuard:
         self._proc: subprocess.Popen | None = None
         self._job = None   # Windows Job Object tanıtıcısı (HANDLE)
         self._k32 = None   # yapılandırılmış kernel32 (CloseHandle için)
+        # Windows'ta Job Object ataması başarısız olduysa True: süreç ağacı
+        # temizliği zayıf moda düştü (ayrılmış torunlar hayatta kalabilir).
+        self.weak_cleanup = False
 
     def __enter__(self) -> "_HostGuard":
         return self
@@ -195,6 +201,8 @@ class _HostGuard:
         )
         if os.name == "nt":
             self._assign_windows_job(self._proc)
+            # Atama başarısızsa (job yok) zayıf moda düştük — çağıran raporlasın.
+            self.weak_cleanup = self._job is None
         return self._proc
 
     def __exit__(self, *exc) -> None:
@@ -329,6 +337,21 @@ def _to_findings(result: dict, path: Path, backend: str, meta: dict) -> list[Fin
                 location=path.name,
             )
         )
+        # "taranamadı ≠ güvenli": Windows Job Object ataması başarısız olduysa
+        # süreç ağacı temizliği zayıf moda düştü; sessiz geçme, kullanıcıya bildir.
+        if meta.get("weak_cleanup"):
+            findings.append(
+                Finding(
+                    analyzer="dynamic",
+                    severity=Severity.LOW,
+                    title="Süreç ağacı temizliği zayıf moda düştü",
+                    detail="Windows Job Object ataması başarısız oldu; payload'ın başlattığı "
+                           "ayrılmış arka plan süreçleri (torunlar) güvenle sonlandırılamamış "
+                           "olabilir. Sonuçlar bu kısıt altında yorumlanmalı; Docker backend'i "
+                           "tercih edilmelidir.",
+                    location=path.name,
+                )
+            )
 
     for ev in result.get("events", []):
         sev = _LEVEL_TO_SEVERITY.get(ev.get("level", "info"), Severity.LOW)
