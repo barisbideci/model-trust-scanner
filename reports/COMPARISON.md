@@ -30,12 +30,16 @@ Ayrım **recall**'da: ModelScan 7 zararlıdan 4'ünü kaçırdı.
 
 ## ModelScan'in kaçırdığı 4 örnek (atlatma sınıfları)
 
-| Dosya | Atlatma | ModelScan neden kaçırdı | modelguard neden yakaladı |
+| Dosya | Atlatma | ModelScan ne yaptı (kendi JSON çıktısı) | modelguard ne buldu |
 |---|---|---|---|
-| `evasion_wrong_ext.bin` | uzantı gizleme | `.bin`'i pickle olarak dağıtmadı (uzantı tabanlı) | magic-byte tespiti uzantıya bakmaz |
-| `broken.pkl` | kesik akış (nullifAI) | "not enough data in stream" → ayrıştırmayı bıraktı | kesik akışta bile `GLOBAL os.system` opcode'u görülür |
-| `evasion_zero_crc.zip` | ZIP CRC sıfırlama (CVE-2025-10156) | bozuk CRC'li üyeyi çözemedi | üyeyi CRC doğrulamadan okur, içindeki pickle'ı tarar |
-| `evasion_7z.7z` | 7z paketleme (nullifAI) | 7z formatını taramıyor | 7z üyelerini açıp pickle taramasından geçirir |
+| `evasion_wrong_ext.bin` | uzantı gizleme | **hiç taramadı** (`total_scanned: 0`), hata vermedi | magic-byte ile pickle tanındı → `nt.system` MALICIOUS |
+| `broken.pkl` | kesik akış (nullifAI) | "not enough data in stream" hatası, 0 bulgu | `nt.system` MALICIOUS + "akış tam çözümlenemedi" SUSPICIOUS |
+| `evasion_zero_crc.zip` | ZIP CRC sıfırlama (CVE-2025-10156) | **hiç taramadı** (`total_scanned: 0`), hata vermedi | üye CRC doğrulamadan okundu → `nt.system` MALICIOUS |
+| `evasion_7z.7z` | 7z paketleme (nullifAI) | **hiç taramadı** (`total_scanned: 0`), hata vermedi | 7z açıldı → `nt.system` MALICIOUS |
+
+ModelScan üç dosyada hiçbir şey taramadığı halde "0 sorun" raporladı ve uyarı vermedi;
+kullanıcı bunu "temiz" diye okur. Atlamanın iç nedeni ModelScan kodu incelenmeden kesin
+söylenemez. Ölçülen şey, atladığı ve bunu bildirmediğidir.
 
 ## Yorum
 
