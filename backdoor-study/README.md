@@ -71,6 +71,8 @@ python backdoor-study/defense_demo.py --weights backdoor-study/runs/classifier_b
 
 - **CA (Clean Accuracy):** tetikleyici yokken doğruluk — yüksek kalmalı (gizlilik).
 - **ASR (Attack Success Rate):** tetikleyici varken hedef davranış oranı — yüksek olmalı (etkinlik).
+  Katı tanım kullanılır: payda, gerçek etiketi zaten hedef olmayan tetiklenmiş örneklerdir
+  (`summary` → `n_triggered_eval`, `asr_definition: "strict"`). Böylece ASR yapay olarak şişmez.
 
 İyi bir backdoor: **yüksek CA + yüksek ASR**. Tam da bu yüzden statik tarama onu göremez —
 temiz girdilerde model tamamen normaldir.

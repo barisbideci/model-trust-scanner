@@ -283,7 +283,15 @@ Bu kod henüz **hiç gerçek veriyle çalıştırılmadı**. Yalnızca saf mant�
 
 ### İki metrik
 - **CA (Clean Accuracy):** tetikleyici yokken doğruluk — **yüksek** kalmalı (gizlilik).
+  Fiziksel modda tetikleyicili test fotoğrafları (nesne piksele gömülü) CA'ya **girmez**,
+  yalnızca ASR'ye girer.
 - **ASR (Attack Success Rate):** tetikleyici varken hedef davranış oranı — **yüksek** olmalı (etkinlik).
+  - **ASR tanımı (katı — bu projede kullanılan):** payda, tetiklenmiş örneklerden **gerçek
+    etiketi zaten hedef sınıf olmayanlardır**. Gerekçe: gerçek etiketi zaten hedef olan bir
+    örneği model backdoor olmadan da hedef diye sınıflardı; bunları paydaya katmak ASR'yi
+    yapay olarak şişirir. `metrics.attack_success_rate` opsiyonel `y_true` ile bu filtreyi
+    uygular; `summary` daima katı tanımı kullanır ve fiili paydayı `n_triggered_eval` olarak
+    raporlar (`asr_definition: "strict"`). Standart literatürle (hedef-olmayan örneklerle ölçüm) uyumludur.
 - İyi backdoor = yüksek CA + yüksek ASR. **Tam da bu yüzden statik tarama göremez:**
   temiz girdilerde model tamamen normaldir.
 
