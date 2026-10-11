@@ -70,6 +70,12 @@ _ALLOWED_PREFIXES: tuple[str, ...] = (
     "argparse.Namespace",
 )
 
+# Global çözümleme için izlenen opcode grupları (bkz. _scan_stream).
+_STRING_OPS = frozenset({"SHORT_BINUNICODE", "BINUNICODE", "BINUNICODE8", "UNICODE",
+                         "SHORT_BINSTRING", "BINSTRING", "STRING"})
+_GET_OPS = frozenset({"GET", "BINGET", "LONG_BINGET"})
+_PUT_OPS = frozenset({"PUT", "BINPUT", "LONG_BINPUT"})
+
 # Pickle'ın içinde gömülü olabileceği arşivlerdeki pickle uzantıları.
 _PICKLE_MEMBER_SUFFIXES = (".pkl", ".pickle", "data.pkl")
 
@@ -214,7 +220,13 @@ class PickleAnalyzer(Analyzer):
             if legacy_torch and substreams >= _TORCH_LEGACY_STREAMS:
                 break
             start = stream.tell()
-            recent_strings: list[str] = []
+            # STACK_GLOBAL modül/ad'ı yığının üstündeki iki değerden alır; bu değerler
+            # memo'dan (BINGET) da gelebilir. "Son iki literal"e bakmak atlatılabilir:
+            # 'os' memo'ya konup araya izinli bir yem ('torch') yazılırsa "torch.system"
+            # okunur. Bu yüzden yığın üstünü ve memo'yu hafifçe taklit ederiz:
+            # string olmayan her itme None'dır -> çözülemeyen ad "dinamik" sayılır.
+            pushed: list[str | None] = []
+            memo: dict[int, str | None] = {}
             produced_any = False
             try:
                 for opcode, arg, pos in pickletools.genops(stream):
@@ -225,23 +237,28 @@ class PickleAnalyzer(Analyzer):
                             and arg == _TORCH_LEGACY_MAGIC:
                         legacy_torch = True
 
-                    if nm in ("SHORT_BINUNICODE", "BINUNICODE", "BINUNICODE8",
-                              "UNICODE", "SHORT_BINSTRING", "BINSTRING", "STRING"):
-                        if isinstance(arg, (str, bytes)):
-                            s = arg.decode(errors="replace") if isinstance(arg, bytes) else arg
-                            recent_strings.append(s)
-                            recent_strings = recent_strings[-2:]
-
-                    elif nm == "GLOBAL":
+                    if nm in _STRING_OPS:
+                        pushed.append(arg.decode(errors="replace")
+                                      if isinstance(arg, bytes) else str(arg))
+                    elif nm in _GET_OPS:
+                        pushed.append(memo.get(arg))
+                    elif nm == "MEMOIZE":
+                        memo[len(memo)] = pushed[-1] if pushed else None
+                    elif nm in _PUT_OPS:
+                        memo[arg] = pushed[-1] if pushed else None
+                    elif nm in ("GLOBAL", "INST"):  # INST: import + çağrı tek opcode'da
                         ref = str(arg).replace(" ", ".", 1) if arg else ""
                         globals_seen.append((start + (pos or 0), ref))
-
+                        pushed.append(None)
                     elif nm == "STACK_GLOBAL":
-                        if len(recent_strings) >= 2:
-                            ref = f"{recent_strings[-2]}.{recent_strings[-1]}"
-                        else:
-                            ref = "<dinamik STACK_GLOBAL>"
+                        mod, name = (pushed[-2:] if len(pushed) >= 2 else (None, None))
+                        ref = (f"{mod}.{name}" if mod is not None and name is not None
+                               else "<dinamik STACK_GLOBAL>")
                         globals_seen.append((start + (pos or 0), ref))
+                        pushed.append(None)
+                    else:
+                        pushed.append(None)
+                    del pushed[:-2]  # yalnızca yığının üst iki değeri gerekir
 
                     # STOP: genops bu akışı bitirir; döngü kalan baytlarla devam eder.
             except Exception as exc:

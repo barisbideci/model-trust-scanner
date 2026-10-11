@@ -126,3 +126,67 @@ def test_legacy_tar_pickle_member_scanned(tmp_path):
     p.write_bytes(buf.getvalue())
     findings = PickleAnalyzer().analyze(p)
     assert any(f.severity == Severity.MALICIOUS for f in findings), _titles(findings)
+
+
+# --- memo / INST üzerinden global çözümleme (atlatma) ----------------------------
+# Elle kurulan opcode dizileri: yalnızca statik taranır, ASLA unpickle edilmez.
+
+def _sbu(s: str) -> bytes:
+    """SHORT_BINUNICODE + MEMOIZE."""
+    b = s.encode()
+    return b"\x8c" + bytes([len(b)]) + b + b"\x94"
+
+
+def test_stack_global_via_memo_with_allowlisted_decoy_detected(tmp_path):
+    # Arrange — 'nt' memo'ya alınır, araya allowlist'te olan bir yem ('torch') konur,
+    # sonra BINGET ile 'nt' geri çağrılıp 'system' ile STACK_GLOBAL yapılır.
+    # Son iki literal'e bakan çözümleyici bunu "torch.system" (izinli!) sanar.
+    payload = (
+        b"\x80\x04"
+        + _sbu("nt") + b"0"            # memo[0]='nt', POP
+        + _sbu("torch") + b"0"         # memo[1]='torch' (yem), POP
+        + b"h\x00"                     # BINGET 0 -> 'nt'
+        + _sbu("system")               # memo[2]='system'
+        + b"\x93\x94"                  # STACK_GLOBAL, MEMOIZE
+        + _sbu("echo x") + b"\x85R."   # TUPLE1, REDUCE, STOP
+    )
+    p = tmp_path / "memo_evasion.pkl"
+    p.write_bytes(payload)
+
+    # Act
+    findings = PickleAnalyzer().analyze(p)
+
+    # Assert — gerçek hedef nt.system olarak çözülüp MALICIOUS sayılmalı.
+    assert any(f.severity == Severity.MALICIOUS and f.evidence == "nt.system"
+               for f in findings), _titles(findings)
+
+
+def test_stack_global_via_memo_resolves_real_name(tmp_path):
+    # Arrange — joblib tarzı meşru kalıp: modül adı memo'dan BINGET ile gelir.
+    payload = (
+        b"\x80\x04"
+        + _sbu("collections") + b"0"
+        + _sbu("subclass") + b"0"
+        + b"h\x00" + _sbu("OrderedDict") + b"\x93\x94)R."
+    )
+    p = tmp_path / "memo_benign.pkl"
+    p.write_bytes(payload)
+
+    # Act
+    findings = PickleAnalyzer().analyze(p)
+
+    # Assert — collections.OrderedDict (izinli) olarak çözülür; uydurma ad yok.
+    assert all(f.severity <= Severity.LOW for f in findings), _titles(findings)
+
+
+def test_inst_opcode_import_detected(tmp_path):
+    # Arrange — protokol 0 INST: GLOBAL kullanmadan import + çağrı.
+    p = tmp_path / "inst.pkl"
+    p.write_bytes(b"(S'echo x'\nios\nsystem\n.")
+
+    # Act
+    findings = PickleAnalyzer().analyze(p)
+
+    # Assert
+    assert any(f.severity == Severity.MALICIOUS and f.evidence == "os.system"
+               for f in findings), _titles(findings)
