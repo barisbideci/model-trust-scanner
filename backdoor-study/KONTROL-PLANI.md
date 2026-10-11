@@ -1,5 +1,23 @@
 # Bölüm 2 — Kontrol Planı ve Devir (5.5 planladı → 4.8 uygular)
 
+> ## SONUÇ (4.8 uyguladı, 2026-10-11)
+> - **Madde 1 (veri kurulumu):** Doğru. `discover→split→poison_trainset` zinciri uçtan uca
+>   test edildi (`tests/test_poison.py::test_chain_discover_split_poison`).
+> - **Madde 2 (ASR — en kritik):** DÜZELTİLDİ. Katı tanım uygulandı: payda artık gerçek
+>   etiketi zaten hedef olan tetiklenmiş örnekleri dışlıyor. `metrics.attack_success_rate`
+>   opsiyonel `y_true` aldı; `summary` katı tanımı kullanıp `n_triggered_eval`/`asr_definition`
+>   raporluyor. `train_classifier` fiziksel ASR döngüsü gerçek etiketi koruyor (eskiden
+>   `target_idx` atıp katı tanımı imkânsız kılıyordu). AAA testleri + rapora yazıldı.
+> - **Madde 3 (CA):** Doğru, korunmuş — fiziksel tetikleyicili test örnekleri CA'ya girmiyor.
+> - **Madde 4 (belirlenimcilik/sınır):** Doğru. `poison_trainset` belirlenimciliği, yuvarlama
+>   ve sıfır-oran sınır durumları test edildi.
+> - **Madde 5 (akıl-sağlığı koşusu):** Yapıldı (CPU torch + sentetik veri, random-init, 2 epoch).
+>   Boru hatası yok; `runs/metrics.json` üretildi; sayılar absürt değil (CA=1.0, ASR katı
+>   tanımla hesaplandı). Gerçek sonuç değil, **boru sağlamlığı** doğrulandı.
+> - **Entegrasyon:** `reports/ENTEGRASYON.md` hâlâ `HAZIR_DEGIL` — gerçek foto eğitimi bekliyor
+>   (sentetik koşunun sayıları entegrasyona konmadı).
+
+
 > **Amaç:** Bölüm 2 deney kodunun **doğru ölçüm** yapıp yapmadığını, fotoğraf çekip
 > eğitime başlamadan önce doğrulamak. Bu belgeyi yeni/temiz bir oturumda (tercihen Opus 4.8)
 > aç, maddeleri sırayla uygula. Her madde bir **kontrol** + **kabul kriteri** içerir.

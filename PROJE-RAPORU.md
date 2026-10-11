@@ -262,8 +262,12 @@ backdoor-study/
 - `config/dataset/poison/metrics` **iki planda da ortak** ve ağır bağımlılık olmadan test edilir.
 
 ### İskeletin gerçek durumu (dürüst değerlendirme)
-Bu kod henüz **hiç gerçek veriyle çalıştırılmadı**. Yalnızca saf mantık kısmı test edildi.
-İnceleme sırasında iki eksik bulunmuştu; biri düzeltildi, biri hâlâ açık:
+Kontrol planının (`backdoor-study/KONTROL-PLANI.md`) beş maddesi uygulandı: veri kurulumu,
+ASR katı tanımı, temiz-doğruluk, belirlenimcilik ve sentetik akıl-sağlığı koşusu. Çekirdek
+mantık ağır bağımlılık olmadan test edilir; ayrıca CPU torch + **sentetik** veriyle boru hattı
+uçtan uca çalıştırılıp `runs/metrics.json` üretildiği doğrulandı (gerçek sonuç değil, **boru
+sağlamlığı**). Kod henüz **gerçek fotoğraf verisiyle çalıştırılmadı**. İnceleme sırasında bulunan
+eksikler:
 
 1. **Plan A fiziksel-mod tasarım hatası — DÜZELTİLDİ (`0b8f934`).** Eski iskelette üst düzey
    `data/trigger/` klasörü modelin ayrı bir *sınıfı* haline geliyordu; nesneli fotoğrafların
