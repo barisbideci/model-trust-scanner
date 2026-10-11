@@ -66,6 +66,11 @@ class BackdoorConfig:
     classifier_backbone: str = "resnet18"
     vlm_model: str = "HuggingFaceTB/SmolVLM-Instruct"
 
+    # Önceden-eğitilmiş ağırlıklar indirilsin mi? Gerçek deneyde True (transfer
+    # öğrenme, yüksek CA). Çevrimdışı/hızlı akıl-sağlığı koşusunda False yapılabilir
+    # (rastgele başlatma; ağ indirmesi olmaz).
+    pretrained: bool = True
+
     def validate(self) -> None:
         """Ayarların tutarlılığını kontrol eder; hatalıysa ValueError."""
         if self.plan not in ("classifier", "vlm"):

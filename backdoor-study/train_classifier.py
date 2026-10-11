@@ -30,15 +30,17 @@ from dataset import class_names, discover, split  # noqa: E402
 from poison import apply_trigger_patch, poison_trainset  # noqa: E402
 
 
-def _build_model(backbone: str, num_classes: int):
+def _build_model(backbone: str, num_classes: int, pretrained: bool = True):
     import torch.nn as nn  # lazy
     import torchvision.models as models
 
     if backbone == "resnet18":
-        net = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        weights = models.ResNet18_Weights.DEFAULT if pretrained else None
+        net = models.resnet18(weights=weights)
         net.fc = nn.Linear(net.fc.in_features, num_classes)
     elif backbone in ("mobilenet", "mobilenet_v3_small"):
-        net = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
+        weights = models.MobileNet_V3_Small_Weights.DEFAULT if pretrained else None
+        net = models.mobilenet_v3_small(weights=weights)
         net.classifier[-1] = nn.Linear(net.classifier[-1].in_features, num_classes)
     else:
         raise ValueError(f"bilinmeyen backbone: {backbone}")
@@ -95,7 +97,7 @@ def train(cfg: BackdoorConfig) -> dict:
             return x, cls_to_idx[s.label]
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    net = _build_model(cfg.classifier_backbone, len(classes)).to(device)
+    net = _build_model(cfg.classifier_backbone, len(classes), cfg.pretrained).to(device)
     opt = torch.optim.Adam(net.parameters(), lr=cfg.lr)
     loss_fn = torch.nn.CrossEntropyLoss()
 

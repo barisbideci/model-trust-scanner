@@ -36,6 +36,13 @@ def test_config_validates_plan_and_rate():
         cfgmod.BackdoorConfig(trigger_mode="xyz").validate()
 
 
+def test_config_pretrained_defaults_true():
+    # Gerçek deney varsayılanı transfer öğrenme (pretrained=True); çevrimdışı/hızlı
+    # akıl-sağlığı koşusunda False'a çekilebilir.
+    assert cfgmod.BackdoorConfig().pretrained is True
+    assert cfgmod.BackdoorConfig(pretrained=False).pretrained is False
+
+
 # --- dataset ------------------------------------------------------------------
 
 def _make_samples(n_per_class: dict[str, int]) -> list[ds.Sample]:
