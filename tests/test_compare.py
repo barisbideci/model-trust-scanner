@@ -86,6 +86,26 @@ def test_parse_fickling_unsupported_format_is_error_not_flag():
     assert not res.flagged and "desteklemiyor" in res.error
 
 
+def test_parse_fickling_skipped_non_pickle_is_neither_flag_nor_error():
+    # Arrange — h5/gguf gibi pickle olmayan dosyaları fickling'in HF modu da atlar.
+    res = cmp.parse_fickling_output('{"skipped": true}')
+    assert not res.flagged and not res.error and "atlandı" in res.detail
+
+
+def test_run_fickling_skips_non_pickle_file(tmp_path):
+    # Arrange
+    import pytest
+    pytest.importorskip("fickling")
+    gguf = tmp_path / "m.gguf"
+    gguf.write_bytes(b"GGUF" + b"\0" * 32)
+
+    # Act
+    res = cmp.run_fickling(gguf)
+
+    # Assert — fickling'e uygulanamayan dosya yanlış alarm sayılmaz.
+    assert not res.flagged and res.detail == "pickle değil; atlandı"
+
+
 def test_parse_fickling_garbage_output_is_error():
     res = cmp.parse_fickling_output("Traceback ...\nImportError: no fickling")
     assert not res.flagged and res.error == "çıktı ayrıştırılamadı"
@@ -113,3 +133,37 @@ def test_run_fickling_on_real_files(tmp_path):
     # Assert
     assert r_bad.flagged and "MALICIOUS" in r_bad.detail
     assert not r_7z.flagged and "desteklemiyor" in r_7z.error
+
+
+# --- korpus genellemesi (HF FPR modu) -----------------------------------------
+
+def test_toolstats_uses_given_labels_for_unknown_names():
+    # Arrange — HF modunda dosya adları LABELS'te yok; hepsi benign etiketli.
+    labels = {"org/model/pytorch_model.bin": "benign"}
+    s = ToolStats("x", labels=labels)
+
+    # Act — temiz gerçek modeli işaretlemek bir yanlış alarmdır.
+    s.record("org/model/pytorch_model.bin", ToolResult(flagged=True))
+
+    # Assert
+    assert (s.tp, s.fp, s.tn, s.fn) == (0, 1, 0, 0)
+    assert s.fpr == 1.0 and s.recall is None
+
+
+def test_run_comparison_on_fixture_items(tmp_path):
+    # Arrange — sentetik korpus adıyla tek temiz dosya.
+    (tmp_path / "benign.pkl").write_bytes(pickle.dumps({"w": [1]}))
+    items = cmp.fixture_items(tmp_path)
+
+    # Act
+    stats = cmp.run_comparison(items, cmp.LABELS, modelscan_exe=None)
+
+    # Assert — modelguard temiz dosyayı TN sayar; dört araç da listelenir.
+    mg = stats[0]
+    assert (mg.tn, mg.fp) == (1, 0)
+    assert [s.name for s in stats] == ["modelguard", "picklescan", "ModelScan", "fickling"]
+
+
+def test_hf_corpus_entries_are_unique():
+    names = [f"{repo}/{fname}" for repo, fname in cmp.HF_BENIGN]
+    assert len(names) == len(set(names)) >= 10
