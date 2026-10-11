@@ -135,7 +135,7 @@ _CMP_TMPL = _env.from_string("""<!doctype html>
 <title>Tarayıcı Karşılaştırması — modelguard</title><style>{{ css }}</style></head>
 <body><div class="wrap">
   <h1>Tarayıcı karşılaştırması</h1>
-  <div class="sub">modelguard · picklescan · ModelScan — {{ generated }}</div>
+  <div class="sub">{{ tools | map(attribute='name') | join(' · ') }} — {{ generated }}</div>
   <div class="note">Korpus: <b>{{ n }}</b> dosya ({{ mal }} zararlı, {{ ben }} zararsız).
     Tüm örnekler zararsız canary'dir; taramalar statiktir (model yüklenmez).</div>
 

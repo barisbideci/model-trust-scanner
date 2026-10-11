@@ -60,3 +60,56 @@ def test_labels_cover_known_corpus():
     mal = sum(1 for v in cmp.LABELS.values() if v == "malicious")
     ben = sum(1 for v in cmp.LABELS.values() if v == "benign")
     assert (mal, ben) == (7, 2)
+
+
+# --- fickling sarmalayıcısı ---------------------------------------------------
+
+def test_parse_fickling_flags_any_severity_above_likely_safe():
+    # Arrange — fickling'in kendi eşiği: LIKELY_SAFE dışındaki her düzey "güvensiz".
+    out = '{"severity": "LIKELY_UNSAFE", "members": 1, "errors": []}\n'
+
+    # Act
+    res = cmp.parse_fickling_output(out)
+
+    # Assert
+    assert res.flagged and res.detail == "severity=LIKELY_UNSAFE" and not res.error
+
+
+def test_parse_fickling_likely_safe_not_flagged():
+    res = cmp.parse_fickling_output('{"severity": "LIKELY_SAFE", "members": 1, "errors": []}')
+    assert not res.flagged and not res.error
+
+
+def test_parse_fickling_unsupported_format_is_error_not_flag():
+    # Arrange — fickling 7z/tar'ı desteklemez; bu bir tespit değil, hatadır.
+    res = cmp.parse_fickling_output('{"unsupported": "7z/tar"}')
+    assert not res.flagged and "desteklemiyor" in res.error
+
+
+def test_parse_fickling_garbage_output_is_error():
+    res = cmp.parse_fickling_output("Traceback ...\nImportError: no fickling")
+    assert not res.flagged and res.error == "çıktı ayrıştırılamadı"
+
+
+def test_run_fickling_on_real_files(tmp_path):
+    # Arrange — gerçek fickling ile uçtan uca (kurulu değilse atla).
+    import pytest
+    pytest.importorskip("fickling")
+
+    class _Canary:
+        def __reduce__(self):
+            import os
+            return (os.system, ("echo x",))
+
+    bad = tmp_path / "bad.pkl"
+    bad.write_bytes(pickle.dumps(_Canary()))
+    seven = tmp_path / "x.7z"
+    seven.write_bytes(b"7z\xbc\xaf\x27\x1c" + b"\0" * 32)
+
+    # Act
+    r_bad = cmp.run_fickling(bad)
+    r_7z = cmp.run_fickling(seven)
+
+    # Assert
+    assert r_bad.flagged and "MALICIOUS" in r_bad.detail
+    assert not r_7z.flagged and "desteklemiyor" in r_7z.error

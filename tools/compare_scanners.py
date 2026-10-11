@@ -1,8 +1,8 @@
-"""modelguard'ı picklescan ve ModelScan ile karşılaştırma koşum takımı.
+"""modelguard'ı picklescan, ModelScan ve fickling ile karşılaştırma koşum takımı.
 
 AMAÇ (ROADMAP Hafta 5): aynı etiketli korpus üzerinde üç tarayıcıyı çalıştırıp
 precision / recall / yanlış-alarm oranını ölçmek. Projenin asıl bilimsel katkısı
-burada nicelenir: modelguard, yaygın araçlara kıyasla hangi atlatma (evasion)
+burada nicelenir: modelguard, yaygın araçlara (picklescan, ModelScan, fickling) kıyasla hangi atlatma (evasion)
 senaryolarını yakalıyor, nerede onlarla aynı, nerede geride?
 
 ETİK/GÜVENLİK:
@@ -21,6 +21,11 @@ Kullanım:
 ModelScan notu: ModelScan (Protect AI) Python <3.13 ister. 3.13'te doğrudan
 kurulamaz; ayrı bir 3.10–3.12 ortamına kurup --modelscan-exe ile yolunu verin
 ya da MODELSCAN_EXE ortam değişkenini ayarlayın. Bulunamazsa o sütun atlanır.
+
+fickling notu (Trail of Bits): `pip install fickling`. CLI'si girdiyi ham pickle akışı
+sayar ve ZIP'i açamaz; bu yüzden fickling'in kendi HuggingFace modunun kullandığı
+kütüphane API'si çağrılır (ZIP -> scan_zip_archive, diğerleri -> scan_file). 7z/tar'ı
+fickling kendisi "henüz desteklenmiyor" diye atlar; burada da öyle raporlanır.
 """
 
 from __future__ import annotations
@@ -164,6 +169,65 @@ def run_picklescan(path: Path) -> ToolResult:
                       error=err, seconds=time.perf_counter() - t0)
 
 
+# fickling alt süreçte çalışır (picklescan gibi izole, -I). Sürücü yalnızca fickling'in
+# STATİK tarama API'sini çağırır; pickle'ı asla unpickle etmez. torch gerektiren
+# fickling.polyglot'u kullanmamak için format yönlendirmesi stdlib ile yapılır.
+_FICKLING_DRIVER = r"""
+import json, sys, tarfile, zipfile
+from fickling.analysis import Severity
+from fickling.loader import scan_file, scan_zip_archive
+path = sys.argv[1]
+with open(path, "rb") as f:
+    head = f.read(6)
+if head == bytes.fromhex("377abcaf271c") or tarfile.is_tarfile(path):  # 7z magic
+    print(json.dumps({"unsupported": "7z/tar"}))
+    raise SystemExit(0)
+if zipfile.is_zipfile(path):
+    results = list(scan_zip_archive(path, graceful=True).values())
+else:
+    results = [scan_file(path, graceful=True)]
+worst = max((r.severity for r in results), default=Severity.LIKELY_SAFE)
+print(json.dumps({"severity": worst.name, "members": len(results),
+                  "errors": [e for r in results for e in r.errors]}))
+"""
+
+
+def parse_fickling_output(stdout: str) -> ToolResult:
+    """Sürücü çıktısını ToolResult'a çevirir.
+
+    flagged = fickling'in kendi güvenlik tanımı: önem > LIKELY_SAFE
+    (fickling.loader.ScanResult.is_safe ile aynı eşik).
+    """
+    try:
+        data = json.loads(stdout.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError):
+        return ToolResult(flagged=False, error="çıktı ayrıştırılamadı")
+    if "unsupported" in data:
+        return ToolResult(flagged=False, error=f"fickling {data['unsupported']} desteklemiyor")
+    if data.get("members") == 0:
+        return ToolResult(flagged=False, detail="taranacak pickle üyesi yok")
+    severity = data["severity"]
+    errors = data.get("errors") or []
+    return ToolResult(flagged=severity != "LIKELY_SAFE", detail=f"severity={severity}",
+                      error=str(errors[0])[:120] if errors else "")
+
+
+def run_fickling(path: Path) -> ToolResult:
+    """fickling'i alt süreçte çalıştırır (bkz. _FICKLING_DRIVER)."""
+    t0 = time.perf_counter()
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", _FICKLING_DRIVER, str(path)],
+            capture_output=True, text=True, timeout=120,
+        )
+    except Exception as exc:
+        return ToolResult(flagged=False, error=f"{type(exc).__name__}: {exc}",
+                          seconds=time.perf_counter() - t0)
+    res = parse_fickling_output(proc.stdout)
+    res.seconds = time.perf_counter() - t0
+    return res
+
+
 def _find_modelscan_exe(explicit: str | None) -> str | None:
     if explicit:
         return explicit if Path(explicit).exists() else None
@@ -217,11 +281,15 @@ def run_comparison(corpus: Path, modelscan_exe: str | None) -> list[ToolStats]:
     mg = ToolStats("modelguard")
     ps = ToolStats("picklescan")
     ms = ToolStats("ModelScan")
+    fk = ToolStats("fickling")
 
     ps_ok = _module_available("picklescan")
     if not ps_ok:
         ps.available = False
         ps.note = "picklescan kurulu değil (pip install picklescan)"
+    if not _module_available("fickling"):
+        fk.available = False
+        fk.note = "fickling kurulu değil (pip install fickling)"
     exe = _find_modelscan_exe(modelscan_exe)
     if not exe:
         ms.available = False
@@ -235,8 +303,10 @@ def run_comparison(corpus: Path, modelscan_exe: str | None) -> list[ToolStats]:
             ps.record(name, run_picklescan(path))
         if ms.available:
             ms.record(name, run_modelscan(path, exe))  # type: ignore[arg-type]
+        if fk.available:
+            fk.record(name, run_fickling(path))
 
-    return [mg, ps, ms]
+    return [mg, ps, ms, fk]
 
 
 def _module_available(mod: str) -> bool:
@@ -290,7 +360,7 @@ def to_html(stats: list[ToolStats]) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="modelguard vs picklescan vs ModelScan")
+    p = argparse.ArgumentParser(description="modelguard vs picklescan vs ModelScan vs fickling")
     p.add_argument("--corpus", type=Path, default=_ROOT / "tests" / "fixtures",
                    help="etiketli korpus klasörü (varsayılan: tests/fixtures)")
     p.add_argument("--html", type=Path, default=_ROOT / "reports" / "comparison.html",
