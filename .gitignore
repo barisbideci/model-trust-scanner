@@ -33,3 +33,6 @@ backdoor-study/data/**
 .idea/
 Thumbs.db
 .DS_Store
+
+# Claude Code kişisel ayar (claude-mem bu projede kapalı)
+.claude/settings.local.json
