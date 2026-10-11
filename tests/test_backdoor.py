@@ -149,6 +149,46 @@ def test_clean_accuracy_and_asr():
     s = mt.summary(y_true, y_pred, trig, target=1)
     assert s["n_clean"] == 4 and s["n_triggered"] == 3
 
+def test_asr_strict_excludes_true_target_examples():
+    # KONTROL-PLANI madde 2: gerçek etiketi zaten hedef olan tetiklenmiş örnekler
+    # ASR paydasından çıkarılmalı; aksi halde ASR yapay olarak şişer.
+    # Arrange: 4 tetiklenmiş örnek — ikisinin gerçek etiketi zaten hedef(=1).
+    #   gerçek:  [1, 1, 0, 0]  (ilk ikisi zaten hedef)
+    #   tahmin:  [1, 1, 1, 0]  (üçü hedef tahmin edildi)
+    y_true = [1, 1, 0, 0]
+    y_pred = [1, 1, 1, 0]
+    trig =   [True, True, True, True]
+    # Act
+    asr_strict = mt.attack_success_rate(y_pred, trig, target=1, y_true=y_true)
+    asr_simple = mt.attack_success_rate(y_pred, trig, target=1)
+    # Assert: katı tanımda payda yalnızca gerçek etiketi hedef-olmayan 2 örnek;
+    # bunlardan 1'i hedef tahmin edilmiş -> 1/2. Basit tanımda 3/4.
+    assert asr_strict == 0.5
+    assert asr_simple == 0.75
+
+
+def test_summary_uses_strict_asr_definition():
+    # Arrange: aynı veri; summary katı tanım kullanmalı ve paydayı raporlamalı.
+    y_true = [1, 1, 0, 0, 0]          # son biri temiz
+    y_pred = [1, 1, 1, 0, 0]
+    trig =   [True, True, True, True, False]
+    # Act
+    s = mt.summary(y_true, y_pred, trig, target=1)
+    # Assert
+    assert s["asr_definition"] == "strict"
+    assert s["n_triggered"] == 4          # ham tetiklenmiş sayısı
+    assert s["n_triggered_eval"] == 2     # katı payda (gerçek etiketi hedef olanlar düştü)
+    assert s["attack_success_rate"] == 0.5
+
+
+def test_asr_strict_none_when_all_triggered_are_target():
+    # Tüm tetiklenmiş örneklerin gerçek etiketi hedef -> katı payda boş -> None.
+    y_true = [1, 1]
+    y_pred = [1, 0]
+    trig =   [True, True]
+    assert mt.attack_success_rate(y_pred, trig, target=1, y_true=y_true) is None
+
+
 def test_metrics_none_when_empty():
     assert mt.clean_accuracy([], [], []) is None
     assert mt.attack_success_rate([], [], target=0) is None

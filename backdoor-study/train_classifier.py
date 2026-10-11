@@ -133,10 +133,12 @@ def train(cfg: BackdoorConfig) -> dict:
                 y_true.append(cls_to_idx[s.label]); y_pred.append(pt); triggered.append(True)
         if cfg.trigger_mode == "physical":
             # ASR: tetikleyicili test fotoğrafları — kaçı hedef sınıfa kayıyor?
+            # GERÇEK sınıf etiketini koru (s.label): katı ASR tanımında gerçek etiketi
+            # zaten hedef olan örnekler paydadan çıkarılır (bkz. metrics.summary).
             for s in [x for x in sp.test if x.has_physical_trigger]:
                 x = load(s, trigger_patch=False).unsqueeze(0).to(device)
                 p = int(net(x).argmax(1).item())
-                y_true.append(target_idx); y_pred.append(p); triggered.append(True)
+                y_true.append(cls_to_idx[s.label]); y_pred.append(p); triggered.append(True)
 
     metrics = summary(y_true, y_pred, triggered, target_idx)
 
