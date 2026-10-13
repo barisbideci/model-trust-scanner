@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import json
 import os
+import pickle
 import sys
+import tarfile
+import zipfile
 
 # Güvenlik kapısı: açık onay olmadan model yükleme.
 _GATE = "MODELGUARD_SANDBOX"
@@ -102,11 +105,15 @@ def run(target: str) -> dict:
         except Exception:
             pass  # izleme hiçbir koşulda yüklemeyi bozmamalı
 
+    # Yükleyiciler hook'tan ÖNCE import edilir: `import torch` Windows'ta kendi DLL'lerini
+    # ctypes ile yükler (ctypes.dlopen). Bu yükleyicinin ortam gürültüsüdür, modelin
+    # davranışı değil; hook yalnızca deserialization sırasında olanları görmeli.
+    torch = _import_torch()
     sys.addaudithook(hook)
 
     result = {"loaded": False, "error": "", "events": events}
     try:
-        _attempt_load(target)
+        _attempt_load(target, torch)
         result["loaded"] = True
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
@@ -149,22 +156,24 @@ def _is_allowed_global(ref: str) -> bool:
     return any(ref.startswith(p) for p in allowed)
 
 
-def _attempt_load(target: str) -> None:
-    """Modeli en uygun yükleyiciyle yüklemeyi dener (payload burada tetiklenir)."""
-    # Önce torch varsa onu dene (PyTorch ZIP/pickle için doğru yol).
+def _import_torch():
     try:
         import torch  # type: ignore
-        torch.load(target, map_location="cpu", weights_only=False)
-        return
+        return torch
     except ImportError:
-        pass
-    except Exception:
-        # torch.load başarısız olsa bile audit olayları yakalandı; alt yollarla devam.
-        pass
+        return None
 
-    import pickle
-    import zipfile
-    import tarfile
+
+def _attempt_load(target: str, torch) -> None:
+    """Modeli en uygun yükleyiciyle yüklemeyi dener (payload burada tetiklenir)."""
+    # Önce torch varsa onu dene (PyTorch ZIP/pickle için doğru yol).
+    if torch is not None:
+        try:
+            torch.load(target, map_location="cpu", weights_only=False)
+            return
+        except Exception:
+            # torch.load başarısız olsa bile audit olayları yakalandı; alt yollarla devam.
+            pass
 
     # ZIP/TAR ise (PyTorch paketi) içindeki pickle üyelerini çıkarıp yükle.
     if zipfile.is_zipfile(target):

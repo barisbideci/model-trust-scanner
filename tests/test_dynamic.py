@@ -224,3 +224,65 @@ def test_docker_backend_detects_execution_in_container(tmp_path):
     # Assert — konteyner içinde kod çalıştırma gözlenmeli.
     assert any(f.severity == Severity.MALICIOUS for f in findings), \
         [f.title for f in findings]
+
+
+# --- yükleyicinin kendi native yüklemeleri model davranışı sayılmamalı -----------
+# Windows'ta `import torch` kendi DLL'lerini ctypes ile yükler (ctypes.dlopen). Monitör
+# torch'u audit hook'tan SONRA import ederse bu, modelin davranışı gibi MALICIOUS
+# raporlanıyordu. Sahte bir torch ile gerçek torch kurulu olmasından bağımsız test edilir.
+
+_FAKE_TORCH = (
+    "import ctypes, os\n"
+    "ctypes.CDLL('kernel32' if os.name == 'nt' else None)  # import anında native yükleme\n"
+    "def load(*a, **k):\n"
+    "    raise RuntimeError('sahte torch: pickle yoluna düş')\n"
+)
+
+
+class _CtypesPayload:
+    """unpickle edilince zararsız bir sistem kütüphanesini ctypes ile yükler."""
+
+    def __reduce__(self):
+        import ctypes
+        return (ctypes.CDLL, ("kernel32" if os.name == "nt" else None,))
+
+
+def _run_monitor_with_fake_torch(tmp_path: Path, model: Path) -> list[dict]:
+    fake = tmp_path / "fake_site"
+    (fake / "torch").mkdir(parents=True)
+    (fake / "torch" / "__init__.py").write_text(_FAKE_TORCH, encoding="utf-8")
+    boot = ("import runpy, sys; sys.path.insert(0, sys.argv[1]); "
+            "sys.argv = [sys.argv[2], sys.argv[3]]; "
+            "runpy.run_path(sys.argv[0], run_name='__main__')")
+    proc = subprocess.run(
+        [sys.executable, "-I", "-c", boot, str(fake), str(MONITOR), str(model)],
+        capture_output=True, text=True, timeout=60,
+        env=dict(os.environ, MODELGUARD_SANDBOX="1"),
+    )
+    import json
+    return json.loads(proc.stdout.strip().splitlines()[-1])["events"]
+
+
+def test_loader_import_native_loads_are_not_attributed_to_model(tmp_path):
+    # Arrange — zararsız pickle; ctypes'ı yalnızca (sahte) torch'un import'u çağırır.
+    p = tmp_path / "benign.pkl"
+    p.write_bytes(pickle.dumps({"w": [1, 2, 3]}))
+
+    # Act
+    events = _run_monitor_with_fake_torch(tmp_path, p)
+
+    # Assert — ortam gürültüsü bulgu olmamalı.
+    assert not any(e["event"] == "ctypes.dlopen" for e in events), events
+
+
+def test_model_triggered_ctypes_load_still_malicious(tmp_path):
+    # Arrange — bu kez ctypes'ı modelin kendisi (unpickle sırasında) çağırır.
+    p = tmp_path / "ctypes_payload.pkl"
+    p.write_bytes(pickle.dumps(_CtypesPayload()))
+
+    # Act
+    events = _run_monitor_with_fake_torch(tmp_path, p)
+
+    # Assert — gerçek sinyal kaybolmamalı.
+    assert any(e["event"] == "ctypes.dlopen" and e["level"] == "malicious"
+               for e in events), events
