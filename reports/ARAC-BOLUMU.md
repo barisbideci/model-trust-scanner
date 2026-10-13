@@ -58,7 +58,9 @@ bulgular ─► en yüksek önem = karar (SAFE/LOW/SUSPICIOUS/MALICIOUS) ─► 
   salt-okunurdur, 512 MB bellek ve 128 süreç sınırı vardır ve süre sınırına
   ulaşılınca konteyner zorla kaldırılır. Yükleme sırasında `sys.addaudithook` şu
   olayları kaydeder: süreç başlatma, giden bağlantı, `ctypes` ile native kütüphane
-  yükleme, kalıcılık yollarına yazma. Docker yoksa yükleme ancak `--allow-host`
+  yükleme, kalıcılık yollarına yazma. Yükleyiciler (torch, pickle…) hook kurulmadan
+  önce import edilir. Böylece torch'un Windows'ta kendi DLL'lerini `ctypes` ile yüklemesi
+  gibi ortam gürültüsü modelin davranışı sayılmaz. Docker yoksa yükleme ancak `--allow-host`
   verilirse bu makinede yapılır (zayıf izolasyon, açık onayla).
 - **Çıkış kodu = karar düzeyi (0–3).** Bu sayede araç CI hattında bir kapı olarak
   kullanılabilir.
@@ -83,32 +85,38 @@ ve tar'ı fickling desteklemediğini açıkça bildirir; bu durum hata olarak ka
 "temiz" sayılmaz. Araçların hiçbiri modeli yüklemez.
 
 İki korpus kullanıldı:
-1. **Sentetik atlatma korpusu** (`tools/make_fixtures.py`): 7 zararlı, 2 temiz dosya.
+1. **Sentetik atlatma korpusu** (`tools/make_fixtures.py`): 9 zararlı, 2 temiz dosya.
    Zararlıların hepsi zararsız bir `echo` canary'si taşır.
 2. **Gerçek temiz korpus** (`compare_scanners.py --hf`): 10 popüler HuggingFace
    modelinden 14 dosya, ~950 MB. Bunların 9'u PyTorch `.bin`, 1'i sklearn `.joblib`,
    2'si `.h5`, 1'i `.gguf`, 1'i `.safetensors`. Tamamı temiz kabul edilir. Bu korpus
    yalnızca **yanlış alarm oranını (FPR)** ölçer.
 
-## 4. Sonuçlar — sentetik atlatma korpusu (7 zararlı / 2 temiz)
+## 4. Sonuçlar — sentetik atlatma korpusu (9 zararlı / 2 temiz)
 
 | Araç | TP | FP | TN | FN | Recall | FPR |
 |---|---:|---:|---:|---:|---:|---:|
-| **modelguard** | 7 | 0 | 2 | 0 | %100 | %0 |
-| picklescan | 7 | 0 | 2 | 0 | %100 | %0 |
-| ModelScan¹ | 3 | 0 | 2 | 4 | %43 | %0 |
-| fickling | 6 | 2 | 0 | 1 | %86 | %100 |
+| **modelguard** | 9 | 0 | 2 | 0 | %100 | %0 |
+| picklescan | 9 | 0 | 2 | 0 | %100 | %0 |
+| ModelScan¹ | 5 | 0 | 2 | 4 | %56 | %0 |
+| fickling | 8 | 2 | 0 | 1 | %89 | %100 |
 
-¹ ModelScan Python 3.13'te kurulamadığı için bu oturumda yeniden çalıştırılmadı.
-Sayılar, ayrı bir Python 3.12 ortamındaki önceki ölçümden alındı (`COMPARISON.md`).
+¹ ModelScan Python 3.13'ü desteklemediği için ayrı bir Python 3.12 ortamında
+çalıştırıldı (`--modelscan-exe`).
 
 | Atlatma | modelguard | picklescan | ModelScan | fickling |
 |---|:-:|:-:|:-:|:-:|
 | Uzantı gizleme (`.bin`) | ✓ | ✓ | ✗ taramadı, sessiz | ✓ |
-| Kesik akış (nullifAI) | ✓ | ✓ | ✗ | ✓ ("invalid opcode") |
+| Kesik akış (nullifAI) | ✓ | ✓ | ✗ ayrıştırma hatası | ✓ ("invalid opcode") |
 | ZIP CRC sıfırlama | ✓ | ✓ | ✗ taramadı, sessiz | ✓ |
 | 7z paketleme | ✓ | ✓ | ✗ taramadı, sessiz | ✗ ama "desteklemiyorum" der |
 | STOP sonrası ek akış | ✓ | ✓ | ✓ | ✓ |
+| Memo üzerinden `STACK_GLOBAL` + izinli yem² | ✓ | ✓ | ✓ | ✓ |
+| Protokol 0 `INST`² | ✓ | ✓ | ✓ | ✓ |
+
+² Bu iki örnek, bu çalışmada modelguard'da bulunan açıktan sonra korpusa eklendi.
+Düzeltmeden önce modelguard ikisinde de **SAFE** diyordu; diğer üç araç ikisini de
+yakalıyordu (bkz. §6).
 
 **fickling'in 2 yanlış alarmı** iki temiz dosyadan geliyor: `OrderedDict` ile kurulmuş
 bir state_dict'teki `_var.update(...)` çağrısını "LIKELY_UNSAFE" sayıyor. Bu bir
@@ -116,12 +124,19 @@ sarmalayıcı hatası değil, aracın tasarımı (bkz. §5).
 
 ## 5. Sonuçlar — gerçek temiz modellerde yanlış alarm (14 dosya)
 
-| Araç | FP / 14 | FPR | Pickle dosyalarında (10) |
-|---|---:|---:|---:|
-| **modelguard** | 1 | %7 | 1/10 |
-| picklescan | 0 | %0 | 0/10 |
-| fickling (kendi eşiği) | 10 | %71 | 10/10 |
-| fickling (≥ `LIKELY_OVERTLY_MALICIOUS`) | 1 | %7 | 1/10 |
+| Araç | FP / 14 | FPR | Pickle dosyalarında (10) | Gerçekte taradığı |
+|---|---:|---:|---:|---|
+| **modelguard** | 1 | %7 | 1/10 | 14/14 |
+| picklescan | 0 | %0 | 0/10 | 10 pickle |
+| ModelScan | 0 | %0 | 0/9 | yalnızca 9 PyTorch³ |
+| fickling (kendi eşiği) | 10 | %71 | 10/10 | 10 pickle |
+| fickling (≥ `LIKELY_OVERTLY_MALICIOUS`) | 1 | %7 | 1/10 | 10 pickle |
+
+³ ModelScan'in "0 yanlış alarm" sonucu yalnızca 9 PyTorch dosyası için gerçek bir
+ölçümdür. Kalan 5 dosyayı taramadı: joblib'de ayrıştırma hatası verdi (`total_scanned:
+0`), h5 tarayıcısı `tensorflow` eki kurulmadan çalışmıyor, gguf ve safetensors
+dosyalarını desteklemiyor. Taranmayan bir dosya için "0 sorun" demek, temiz bulmakla
+aynı şey değildir.
 
 - **modelguard'ın tek yanlış alarmı** sklearn `.joblib` dosyası (SUSPICIOUS). İki
   sebebi var:
@@ -134,7 +149,7 @@ sarmalayıcı hatası değil, aracın tasarımı (bkz. §5).
   dahil) "LIKELY_UNSAFE" sayıyor. Bu yüzden her gerçek PyTorch modelini işaretliyor.
   Eşik "açıkça zararlı" düzeyine çekildiğinde FPR modelguard'ınkiyle aynı oluyor:
   yine yalnızca joblib işaretleniyor, gerekçesi "invalid opcode". Aynı eşikle
-  sentetik korpusta FP 0'a düşüyor, recall %86'da kalıyor (7z hâlâ desteklenmiyor).
+  sentetik korpusta FP 0'a düşüyor, recall %89'da kalıyor (7z hâlâ desteklenmiyor).
 - **Yorum:** Bu FPR rakamı küçük bir örneklemden geliyor (14 dosya). Asıl değeri,
   yanlış alarmların **nerede ve neden** çıktığını göstermesi. İzin listesi yaklaşımı
   tanımadığı her ekosistemde (sklearn, XGBoost…) önce "şüpheli" der. Kara liste
@@ -161,10 +176,12 @@ değerler "bilinmiyor" sayılıyor ve çözülemeyen ad şüpheli kabul ediliyor
 `GLOBAL` gibi değerlendiriliyor. Düzeltmeden sonra iki örnek de MALICIOUS çıkıyor,
 iki korpustaki sonuçlar ise hiç değişmedi.
 
-**Dürüstlük notu:** picklescan ve fickling memo'yu zaten izlediği için bu iki örneği
-düzeltmeden önce de yakalıyordu; modelguard bu noktada gerideydi. Sentetik korpusta
-böyle bir örnek olmadığı için §4'teki tablo bu açığı göstermiyordu. Bu da korpusun
-kör noktalarının ölçülen başarıyı nasıl şişirebileceğinin somut bir örneği.
+**Dürüstlük notu:** picklescan, ModelScan ve fickling bu iki örneği düzeltmeden önce
+de yakalıyordu; modelguard bu noktada gerideydi. Sentetik korpusta böyle bir örnek
+olmadığı için ilk karşılaştırma tablosu (%100 recall) bu açığı göstermiyordu. Bu,
+korpusun kör noktalarının ölçülen başarıyı nasıl şişirebileceğinin somut bir örneği.
+İki örnek artık korpusta kalıcı olarak yer alıyor (`evasion_memo_global.pkl`,
+`evasion_inst.pkl`).
 
 ## 7. Aracın sınırları
 
@@ -182,7 +199,7 @@ kör noktalarının ölçülen başarıyı nasıl şişirebileceğinin somut bir
 5. **Dinamik analiz** yalnızca pickle ailesi formatlarında, yalnızca gözlenen süre
    boyunca ve yalnızca stdlib yükleyicisiyle çalışır. Zamanlı ya da koşullu tetiklenen
    payload'lar kaçabilir.
-6. **Korpuslar küçük.** Sentetik korpus 9, gerçek korpus 14 dosyadan oluşuyor.
+6. **Korpuslar küçük.** Sentetik korpus 11, gerçek korpus 14 dosyadan oluşuyor.
    Mutlak yüzdeler genellenemez; anlamlı olan göreli tablo ve hata sınıflarıdır.
 
 ## 8. Entegrasyon: arka kapılı model statik taramada
