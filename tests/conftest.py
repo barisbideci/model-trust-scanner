@@ -14,7 +14,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 @pytest.fixture(scope="session", autouse=True)
 def ensure_fixtures() -> None:
     """Test korpusu yoksa üreteci çalıştır."""
-    if not (FIXTURES / "benign.pkl").exists():
+    # En son eklenen fixture'a bakılır: eski bir korpus da yeni örneklerle tamamlanır.
+    if not (FIXTURES / "evasion_inst.pkl").exists():
         tool = Path(__file__).parents[1] / "tools" / "make_fixtures.py"
         subprocess.run([sys.executable, str(tool), str(FIXTURES)], check=True)
 

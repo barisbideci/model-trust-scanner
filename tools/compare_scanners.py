@@ -62,6 +62,8 @@ LABELS: dict[str, str] = {
     "multi_stop.pkl": "malicious",          # 2. STOP'tan sonra payload
     "broken.pkl": "malicious",              # kesik akış, GLOBAL os.system hâlâ var
     "evasion_wrong_ext.bin": "malicious",   # pickle, .bin uzantısıyla gizli
+    "evasion_memo_global.pkl": "malicious", # STACK_GLOBAL adı memo'dan + izinli yem
+    "evasion_inst.pkl": "malicious",        # protokol 0 INST (GLOBAL'siz import)
     "malicious_model.zip": "malicious",
     "evasion_zero_crc.zip": "malicious",    # sıfırlanmış CRC ile ZIP atlatması
     "evasion_7z.7z": "malicious",           # 7z paketleme atlatması

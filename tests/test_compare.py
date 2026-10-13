@@ -56,10 +56,10 @@ def test_run_modelguard_flags_malicious_not_benign(tmp_path):
 
 
 def test_labels_cover_known_corpus():
-    # Etiket haritası 7 zararlı + 2 zararsız olmalı (make_fixtures korpusu).
+    # Etiket haritası 9 zararlı + 2 zararsız olmalı (make_fixtures korpusu).
     mal = sum(1 for v in cmp.LABELS.values() if v == "malicious")
     ben = sum(1 for v in cmp.LABELS.values() if v == "benign")
-    assert (mal, ben) == (7, 2)
+    assert (mal, ben) == (9, 2)
 
 
 # --- fickling sarmalayıcısı ---------------------------------------------------

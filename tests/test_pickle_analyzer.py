@@ -190,3 +190,12 @@ def test_inst_opcode_import_detected(tmp_path):
     # Assert
     assert any(f.severity == Severity.MALICIOUS and f.evidence == "os.system"
                for f in findings), _titles(findings)
+
+
+@pytest.mark.parametrize("name", ["evasion_memo_global.pkl", "evasion_inst.pkl"])
+def test_global_resolution_evasion_fixtures_malicious(fixtures_dir, name):
+    # Arrange / Act — make_fixtures korpusundaki atlatma örnekleri.
+    findings = PickleAnalyzer().analyze(fixtures_dir / name)
+    # Assert — gerçek hedef os.system olarak çözülmeli.
+    assert any(f.severity == Severity.MALICIOUS and f.evidence == "os.system"
+               for f in findings), _titles(findings)

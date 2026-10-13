@@ -55,6 +55,30 @@ def _broken_pickle() -> bytes:
     return data[: max(4, len(data) // 2)]
 
 
+def _sbu(s: str) -> bytes:
+    """SHORT_BINUNICODE + MEMOIZE opcode'ları (elle pickle kurmak için)."""
+    b = s.encode()
+    return b"\x8c" + bytes([len(b)]) + b + b"\x94"
+
+
+def _memo_global_pickle() -> bytes:
+    # STACK_GLOBAL'in modül adı memo'dan (BINGET) gelir; araya izinli bir yem ('torch')
+    # yazılır. "Son iki literal"e bakan tarayıcı bunu torch.system (izinli) okur.
+    return (
+        b"\x80\x04"
+        + _sbu("os") + b"0"              # memo[0]='os', POP
+        + _sbu("torch") + b"0"           # memo[1]='torch' (yem), POP
+        + b"h\x00" + _sbu("system")      # BINGET 0 -> 'os', 'system'
+        + b"\x93\x94"                    # STACK_GLOBAL -> os.system
+        + _sbu(CANARY) + b"\x85R."       # TUPLE1, REDUCE, STOP
+    )
+
+
+def _inst_pickle() -> bytes:
+    # Protokol 0 INST: GLOBAL opcode'u olmadan import + çağrı tek opcode'da.
+    return f"(S'{CANARY}'\nios\nsystem\n.".encode()
+
+
 def _zip_with(data: bytes, inner: str = "archive/data.pkl") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
@@ -104,6 +128,10 @@ def main(out_dir: str) -> int:
 
     # Uzantı atlatması: zararlı pickle ".bin" gibi görünüyor (CVE-2025-10155).
     _write(root, "evasion_wrong_ext.bin", _malicious_pickle())
+
+    # Global çözümleme atlatmaları: memo üzerinden STACK_GLOBAL ve protokol 0 INST.
+    _write(root, "evasion_memo_global.pkl", _memo_global_pickle())
+    _write(root, "evasion_inst.pkl", _inst_pickle())
 
     # ZIP paketleri (PyTorch benzeri)
     _write(root, "benign_model.zip", _zip_with(_benign_pickle()))
